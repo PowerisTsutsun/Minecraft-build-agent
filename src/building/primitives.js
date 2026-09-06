@@ -672,4 +672,194 @@ function stairs ({
   return clear.concat(solid)
 }
 
-module.exports = { floor, wall, box, sphere, house, cylinder, cone, pyramid, gable, arch, spiral, stairs, outsideIn, circleLimit, ascentFacing }
+
+// ---------------------------------------------------------------------------
+// Wall-relative openings.
+//
+// A window is named by the face it sits in and how far along that face it is,
+// not by a coordinate the model had to work out. Give it the building's
+// footprint and it finds the wall itself; give it neither and the offset is
+// taken as the opening's own lower corner.
+//
+// It carves only as deep as the wall actually is - walked outward from the
+// wall plane while `isSolid` says there is still wall - so a window in a
+// one-thick wall does not bore a tunnel into the room behind it. That was the
+// failure mode when openings were plain `air` boxes: a three-deep window carve
+// reached past the wall and ate four treads off the staircase inside.
+// ---------------------------------------------------------------------------
+
+const FACES = {
+  north: { normal: new Vec3(0, 0, -1), along: 'x' },
+  south: { normal: new Vec3(0, 0, 1), along: 'x' },
+  east: { normal: new Vec3(1, 0, 0), along: 'z' },
+  west: { normal: new Vec3(-1, 0, 0), along: 'z' }
+}
+
+// Where the opening's lower corner sits, in the shape's own coordinates.
+function openingCorner ({ face, along = 0, y = 0, footprint }) {
+  const f = FACES[face] || FACES.north
+  if (!footprint) return { start: new Vec3(0, y, 0), f }
+  const w = Math.max(1, Math.floor(footprint.width || 1))
+  const d = Math.max(1, Math.floor(footprint.depth || 1))
+  const a = Math.floor(along)
+  const start = face === 'north' ? new Vec3(a, y, 0)
+    : face === 'south' ? new Vec3(a, y, d - 1)
+      : face === 'east' ? new Vec3(w - 1, y, a)
+        : new Vec3(0, y, a)
+  return { start, f }
+}
+
+// How thick is the wall here? Walk inward from the outer plane while solid,
+// capped so a window never becomes a tunnel through a solid mass.
+const MAX_WALL_THICKNESS = 4
+
+function wallThickness (start, normal, isSolid) {
+  if (!isSolid) return 1
+  let n = 0
+  for (let t = 0; t < MAX_WALL_THICKNESS; t++) {
+    const probe = start.plus(normal.scaled(-t))
+    if (!isSolid(probe)) break
+    n++
+  }
+  return Math.max(1, n)
+}
+
+// The cells of an opening's face, honouring its style.
+function openingShape (width, height, style) {
+  const cells = []
+  const w = Math.max(1, Math.floor(width))
+  const h = Math.max(1, Math.floor(height))
+  const r = Math.floor((w - 1) / 2)
+  const straight = style === 'arched' ? Math.max(1, h - r) : h
+
+  for (let level = 0; level < h; level++) {
+    let lo = 0
+    let hi = w - 1
+    if (style === 'arched' && level >= straight) {
+      const dy = level - straight + 1
+      const inner = r * r - dy * dy
+      if (inner < 0) continue
+      const half = Math.floor(Math.sqrt(inner))
+      lo = r - half
+      hi = r + half
+    }
+    for (let a = lo; a <= hi; a++) {
+      // A mullion is a single column of wall left standing down the middle.
+      if (style === 'mullion' && w >= 3 && a === r && level < h - 1) continue
+      cells.push({ a, level })
+    }
+  }
+  return cells
+}
+
+function placeOnFace (start, f, a, level, depth) {
+  const out = []
+  for (let t = 0; t < depth; t++) {
+    const base = start.plus(f.normal.scaled(-t)).offset(0, level, 0)
+    out.push(f.along === 'x' ? base.offset(a, 0, 0) : base.offset(0, 0, a))
+  }
+  return out
+}
+
+// window: carve the opening, glaze it, frame it, sill below, lintel above.
+function window ({
+  face = 'north', along = 0, width = 2, height = 3, style = 'plain',
+  frame = null, glass = 'glass_pane', mullion = null,
+  footprint = null, sill = null, lintel = null, isSolid = null, y = 0
+}) {
+  const { start, f } = openingCorner({ face, along, y, footprint })
+  const depth = wallThickness(start, f.normal, isSolid)
+  const shape = openingShape(width, height, style)
+  const carved = []
+  const solid = []
+
+  for (const { a, level } of shape) {
+    for (const pos of placeOnFace(start, f, a, level, depth)) carved.push({ pos, name: 'air' })
+  }
+  // Glazing goes in the outer plane only; the rest of the reveal stays open.
+  for (const { a, level } of shape) {
+    if (glass) solid.push({ pos: placeOnFace(start, f, a, level, 1)[0], name: glass })
+  }
+
+  if (frame) {
+    const inShape = (a, level) => shape.some(c => c.a === a && c.level === level)
+    for (let a = -1; a <= width; a++) {
+      for (let level = -1; level <= height; level++) {
+        if (inShape(a, level)) continue
+        if (a < -1 || a > width) continue
+        const ring = a === -1 || a === width || level === -1 || level === height ||
+          !inShape(a, level)
+        if (!ring) continue
+        for (const pos of placeOnFace(start, f, a, level, depth)) solid.push({ pos, name: frame })
+      }
+    }
+  }
+
+  const outward = f.normal
+  if (sill) {
+    for (let a = 0; a < width; a++) {
+      const base = placeOnFace(start, f, a, -1, 1)[0].plus(outward)
+      solid.push({ pos: base, name: sill })
+    }
+  }
+  if (lintel) {
+    for (let a = 0; a < width; a++) {
+      const base = placeOnFace(start, f, a, height, 1)[0].plus(outward)
+      solid.push({ pos: base, name: lintel })
+    }
+  }
+
+  return carved.concat(solid)
+}
+
+// door: the same carve, reaching the ground, with real door blocks and a lintel.
+function door ({
+  face = 'north', along = 0, width = 1, height = 3, arched = false,
+  doorBlock = null, frame = null, lintel = null,
+  footprint = null, isSolid = null, y = 0
+}) {
+  const { start, f } = openingCorner({ face, along, y, footprint })
+  const depth = wallThickness(start, f.normal, isSolid)
+  const w = Math.max(1, Math.min(2, Math.floor(width)))
+  const h = Math.max(2, Math.floor(height))
+  const shape = openingShape(w, h, arched ? 'arched' : 'plain')
+  const carved = []
+  const solid = []
+
+  for (const { a, level } of shape) {
+    for (const pos of placeOnFace(start, f, a, level, depth)) carved.push({ pos, name: 'air' })
+  }
+
+  if (frame) {
+    for (let a = -1; a <= w; a++) {
+      for (let level = -1; level <= h; level++) {
+        const inShape = shape.some(c => c.a === a && c.level === level)
+        if (inShape) continue
+        if (level < -1) continue
+        for (const pos of placeOnFace(start, f, a, level, depth)) solid.push({ pos, name: frame })
+      }
+    }
+  }
+
+  // Real doors: two halves, hinged outward from the middle of a double door.
+  if (doorBlock) {
+    const facing = face
+    for (let a = 0; a < w; a++) {
+      const hinge = w === 2 ? (a === 0 ? 'left' : 'right') : 'left'
+      const column = placeOnFace(start, f, a, 0, 1)[0]
+      solid.push({ pos: column, name: `${doorBlock}[facing=${facing},half=lower,hinge=${hinge}]` })
+      solid.push({ pos: column.offset(0, 1, 0), name: `${doorBlock}[facing=${facing},half=upper,hinge=${hinge}]` })
+    }
+  }
+
+  if (lintel) {
+    for (let a = -1; a <= w; a++) {
+      for (const pos of placeOnFace(start, f, a, h, depth)) solid.push({ pos, name: lintel })
+    }
+  }
+
+  return carved.concat(solid)
+}
+
+
+module.exports = { floor, wall, box, sphere, house, cylinder, cone, pyramid, gable, arch, spiral, stairs, window, door, openingShape, outsideIn, circleLimit, ascentFacing }

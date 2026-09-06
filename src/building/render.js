@@ -128,6 +128,16 @@ function shapeFor (action, primitives, ctx) {
       flare: action.flare,
       stringerPattern: action.stringerPattern
     })
+    case 'window': return primitives.window({
+      face: action.face, along: action.along, width: action.width, height: action.height,
+      style: action.style, frame: action.frame, glass: action.glass, sill: action.sill,
+      lintel: action.lintel, footprint: action.footprint, isSolid: ctx && ctx.isSolid
+    })
+    case 'door': return primitives.door({
+      face: action.face, along: action.along, width: action.width, height: action.height,
+      arched: action.arched, doorBlock: action.doorBlock, frame: action.frame,
+      lintel: action.lintel, footprint: action.footprint, isSolid: ctx && ctx.isSolid
+    })
     case 'blocks': return action.cells.map(c => ({ pos: new Vec3(c.x, c.y, c.z), name: c.material }))
     default: return []
   }
@@ -195,6 +205,13 @@ function renderPlan (plan, primitives, opts = {}) {
         const world = local.plus(off)
         const c = cells.get(key(world.x, world.y, world.z))
         return !c || baseName(c.name) === 'air'
+      },
+      // An opening carves only as deep as there is wall, which means asking
+      // the cell map how thick the wall it is cutting through actually is.
+      isSolid: local => {
+        const world = local.plus(off)
+        const c = cells.get(key(world.x, world.y, world.z))
+        return Boolean(c) && baseName(c.name) !== 'air'
       }
     }
     return shapeFor(action, primitives, ctx).map(b => ({ pos: b.pos.plus(off), name: b.name }))

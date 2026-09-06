@@ -2,7 +2,7 @@
 
 const { MAX_SIZE, MIN_SIZE, MAX_BLOCKS, MAX_ACTIONS } = require('../config')
 const style = require('./style')
-const { baseName, isValidSpec, familyVariant } = require('../building/blockspec')
+const { baseName, isValidSpec, familyVariant, hasState: hasStateFor } = require('../building/blockspec')
 const render = require('../building/render')
 
 // ---------------------------------------------------------------------------
@@ -85,7 +85,7 @@ const ACTION_SCHEMA = {
   properties: {
     op: {
       type: 'string',
-      enum: ['floor', 'wall', 'box', 'sphere', 'house', 'cylinder', 'cone', 'pyramid', 'gable', 'arch', 'stairs', 'spiral', 'blocks']
+      enum: ['floor', 'wall', 'box', 'sphere', 'house', 'cylinder', 'cone', 'pyramid', 'gable', 'arch', 'stairs', 'window', 'door', 'spiral', 'blocks']
     },
     material: {
       type: 'string',
@@ -136,6 +136,18 @@ const ACTION_SCHEMA = {
     landing_every: { type: 'integer', description: 'stairs: flat landing after every N steps. Use on anything over 8.' },
     turn: { type: 'string', enum: ['none', 'left', 'right'], description: 'stairs: turn 90 degrees at each landing.' },
     flare: { type: 'integer', description: 'stairs: widen the bottom N steps by one each side. 0-2.' },
+    face: { type: 'string', enum: ['north', 'south', 'east', 'west'], description: 'window, door: which wall of the footprint it sits in.' },
+    along: { type: 'integer', description: 'window, door: how far along that wall, from its lowest corner.' },
+    footprint: {
+      type: 'object',
+      description: 'window, door: the building footprint the opening belongs to, so the wall can be found for you.',
+      properties: { width: { type: 'integer' }, depth: { type: 'integer' } }
+    },
+    style: { type: 'string', enum: ['plain', 'arched', 'mullion'], description: 'window only.' },
+    arched: { type: 'boolean', description: 'door only.' },
+    frame: { type: 'string', description: 'window, door: trim around the opening.' },
+    glass: { type: 'string', description: 'window: what to glaze with. Defaults to glass_pane.' },
+    door_block: { type: 'string', description: 'door: a real door, e.g. oak_door. Facing, half and hinge are computed.' },
     railing: { type: 'string', description: 'spiral: a wall or fence block for the open side. Omitted means no railing.' },
     column: { type: 'string', description: 'spiral: the central column block. Defaults to the solid the tread is made of.' },
     rise_per_tread: { type: 'number', enum: [0.5, 1], description: 'spiral: 0.5 gives a gentler stair of alternating slabs.' },
@@ -194,7 +206,7 @@ const PLAN_TOOL = {
 
 // Op tables, shared by the validator and by planToBlocks so the two can never
 // drift into disagreeing about what an op needs.
-const OPS = ['floor', 'wall', 'box', 'sphere', 'house', 'cylinder', 'cone', 'pyramid', 'gable', 'arch', 'stairs', 'spiral', 'blocks']
+const OPS = ['floor', 'wall', 'box', 'sphere', 'house', 'cylinder', 'cone', 'pyramid', 'gable', 'arch', 'stairs', 'window', 'door', 'spiral', 'blocks']
 
 const REQUIRED_DIMS = {
   floor: ['width', 'depth'],
@@ -208,6 +220,8 @@ const REQUIRED_DIMS = {
   gable: ['width', 'depth'],
   arch: ['width', 'height'],
   stairs: ['width', 'rise'],
+  window: ['width', 'height'],
+  door: ['width', 'height'],
   spiral: ['radius', 'height'],
   blocks: []
 }
@@ -409,7 +423,7 @@ function validatePlan (plan, isKnownBlock) {
       errors.push(`${where}: stairs need a tread material`)
       return
     }
-    if (action.op !== 'blocks' && action.op !== 'stairs' && sharedMaterial === null) {
+    if (!['blocks', 'stairs', 'window', 'door'].includes(action.op) && sharedMaterial === null) {
       errors.push(`${where}: needs a material`)
       return
     }
@@ -488,6 +502,50 @@ function validatePlan (plan, isKnownBlock) {
           return
         }
         cells.push({ x: cx, y: cy, z: cz, material: cellMaterial })
+      }
+    }
+
+    let opening
+    if (action.op === 'window' || action.op === 'door') {
+      opening = {}
+      opening.face = ['north', 'south', 'east', 'west'].includes(action.face) ? action.face : 'north'
+      opening.along = intOr(action.along, 0)
+      if (action.footprint && Number.isFinite(action.footprint.width) && Number.isFinite(action.footprint.depth)) {
+        opening.footprint = {
+          width: Math.max(1, Math.floor(action.footprint.width)),
+          depth: Math.max(1, Math.floor(action.footprint.depth))
+        }
+      }
+      opening.frame = typeof action.frame === 'string' ? action.frame : null
+      opening.lintel = typeof action.lintel === 'string' ? action.lintel : null
+
+      if (action.op === 'window') {
+        opening.style = ['plain', 'arched', 'mullion'].includes(action.style) ? action.style : 'plain'
+        opening.glass = typeof action.glass === 'string' ? action.glass
+          : (typeof action.material === 'string' ? action.material : 'glass_pane')
+        if (opening.frame && !opening.lintel) {
+          opening.lintel = familyVariant(opening.frame, 'slab', isKnownBlock)
+        }
+        opening.sill = typeof action.sill === 'string' ? action.sill
+          : (opening.frame ? familyVariant(opening.frame, 'stairs', isKnownBlock) : null)
+        if (opening.sill && !hasStateFor(opening.sill)) {
+          opening.sill = `${opening.sill}[half=bottom,facing=${opening.face}]`
+        }
+      } else {
+        opening.arched = action.arched === true
+        opening.doorBlock = typeof action.door_block === 'string' ? action.door_block : null
+        if (opening.frame && !opening.lintel) {
+          opening.lintel = familyVariant(opening.frame, 'slab', isKnownBlock)
+        }
+      }
+
+      const extras = [opening.frame, opening.glass, opening.lintel, opening.doorBlock]
+        .filter(Boolean)
+        .concat(opening.sill ? [baseName(opening.sill)] : [])
+      const unknown = extras.find(m => !isKnownBlock(m))
+      if (unknown) {
+        errors.push(`${where}: "${unknown}" is not a block this server knows`)
+        return
       }
     }
 
@@ -577,6 +635,7 @@ function validatePlan (plan, isKnownBlock) {
       ...(cells ? { cells } : {}),
       ...(stair || {}),
       ...(helix || {}),
+      ...(opening || {}),
       ...dims
     })
   })
