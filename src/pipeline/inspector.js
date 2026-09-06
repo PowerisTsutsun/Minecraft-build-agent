@@ -30,6 +30,7 @@ const SETTLE_TICKS = 8
 const VOLATILE = /water|lava|torch|lantern|vine|leaves|sapling|fire|snow|button|pressure_plate/
 
 async function inspect (bot, origin, blocks, opts = {}) {
+  const treadCells = opts.treads || null
   const expected = new Map()
   for (const b of blocks) {
     const p = b.pos
@@ -64,7 +65,7 @@ async function inspect (bot, origin, blocks, opts = {}) {
   // Reachability, structurally: is there a way in, and does every staircase
   // still have unobstructed headroom?
   const openings = countGroundOpenings(bot, origin, blocks)
-  const stairs = auditStairs(bot, blocks)
+  const stairs = auditStairs(bot, blocks, treadCells)
 
   const report = {
     checked,
@@ -127,22 +128,29 @@ function countGroundOpenings (bot, origin, blocks) {
   return found
 }
 
-// Every stair tread must still have two clear blocks above it in the world.
-function auditStairs (bot, blocks) {
-  const treads = blocks.filter(b => /_stairs\[facing=(north|south|east|west),half=bottom/.test(b.name))
+// Only cells the renderer says came from a stairs or spiral op count as treads.
+//
+// A roof is made of stairs facing a direction too, and a gable's slope steps
+// diagonally so the cell above each course is empty - indistinguishable from a
+// tread by any geometric test. Counting every stair block reported 637 of 903
+// "blocked" on a keep whose staircases were fine. Provenance is the only honest
+// answer, so the renderer hands the tread list over.
+function auditStairs (bot, blocks, treadCells) {
+  if (!treadCells || !treadCells.length) return { treads: 0, blocked: 0, where: [] }
+
   let blocked = 0
   const where = []
-  for (const t of treads) {
+  for (const t of treadCells) {
     for (const dy of [1, 2]) {
-      const above = bot.blockAt(t.pos.offset(0, dy, 0))
+      const above = bot.blockAt(new Vec3(t.x, t.y + dy, t.z))
       if (above && above.boundingBox === 'block') {
         blocked++
-        if (where.length < 4) where.push({ x: t.pos.x, y: t.pos.y, z: t.pos.z, by: above.name })
+        if (where.length < 4) where.push({ x: t.x, y: t.y, z: t.z, by: above.name })
         break
       }
     }
   }
-  return { treads: treads.length, blocked, where }
+  return { treads: treadCells.length, blocked, where }
 }
 
 // ---------------------------------------------------------------------------

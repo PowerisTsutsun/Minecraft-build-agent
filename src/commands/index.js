@@ -421,7 +421,7 @@ async function make (bot, request, requester) {
   state.lastRequest = request
   say(bot, `Plan: ${plan.summary}`)
   console.log('[!make] validated plan:', JSON.stringify(plan.actions, null, 2))
-  await runBuild(bot, blocks, `make: ${request}`.slice(0, 80), requester, run)
+  await runBuild(bot, blocks, `make: ${request}`.slice(0, 80), requester, run, out.treads)
 }
 
 // ---------------------------------------------------------------------------
@@ -552,7 +552,7 @@ async function placeTemplate (bot, name, requester) {
 // ---------------------------------------------------------------------------
 // Shared build runner: origin, material check, dry-run, execution, reporting.
 // ---------------------------------------------------------------------------
-async function runBuild (bot, blocks, label, requester, buildRun) {
+async function runBuild (bot, blocks, label, requester, buildRun, treads) {
   if (state.building) return say(bot, 'Already building - say !stop first.')
   if (blocks.length > MAX_BLOCKS) {
     return say(bot, `That's ${blocks.length} blocks, over the ${MAX_BLOCKS} cap.`)
@@ -669,13 +669,14 @@ async function runBuild (bot, blocks, label, requester, buildRun) {
     if (stats.mode === 'command' && !state.cancelled && stats.placed) {
       try {
         const worldBlocks = blocks.map(b => ({ pos: origin.plus(b.pos), name: b.name }))
-        let report = await inspector.inspect(bot, origin, worldBlocks)
+        const worldTreads = (treads || []).map(t => ({ x: origin.x + t.x, y: origin.y + t.y, z: origin.z + t.z }))
+        let report = await inspector.inspect(bot, origin, worldBlocks, { treads: worldTreads })
 
         if (!report.pass && report.detail.length) {
           const fix = await inspector.repair(bot, report, worldBlocks, commander)
           if (fix.fixed) {
             say(bot, `Fixed ${fix.fixed} block${fix.fixed === 1 ? '' : 's'} that had not landed.`)
-            report = await inspector.inspect(bot, origin, worldBlocks)
+            report = await inspector.inspect(bot, origin, worldBlocks, { treads: worldTreads })
           }
         }
 

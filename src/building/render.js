@@ -382,7 +382,19 @@ function renderPlan (plan, primitives, opts = {}) {
   const blocks = [...cells.values()].sort((a, b) => a.order - b.order)
     .map(c => ({ pos: c.pos, name: c.name }))
 
-  return { blocks, errors, warnings, drops: drops.length, decor: decorated.applied }
+  // Which cells are staircase treads, by PROVENANCE rather than by shape.
+  // A roof is also made of stairs facing a direction, and a gable's slope steps
+  // diagonally so the cell above each course is empty - identical to a tread by
+  // any geometric test. Only the action that wrote it can tell them apart.
+  const treads = []
+  for (const cell of cells.values()) {
+    const action = actions[cell.action]
+    if (!action || (action.op !== 'stairs' && action.op !== 'spiral')) continue
+    if (!/_stairs\[/.test(cell.name)) continue
+    treads.push({ x: cell.pos.x, y: cell.pos.y, z: cell.pos.z })
+  }
+
+  return { blocks, treads, errors, warnings, drops: drops.length, decor: decorated.applied }
 }
 
 // ---------------------------------------------------------------------------

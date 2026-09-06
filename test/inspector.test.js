@@ -60,7 +60,8 @@ const worldFrom = blocks => {
 
 ;(async () => {
   // --- a world that matches the plan ---------------------------------------
-  const perfect = await inspector.inspect(stubBot(worldFrom(plan)), new Vec3(0, 0, 0), plan)
+  const planTreads = plan.filter(b => /_stairs\[/.test(b.name)).map(b => ({ x: b.pos.x, y: b.pos.y, z: b.pos.z }))
+  const perfect = await inspector.inspect(stubBot(worldFrom(plan)), new Vec3(0, 0, 0), plan, { treads: planTreads })
   check('inspector: a matching world passes', perfect.pass, inspector.summarise(perfect))
   // The plan has duplicate coordinates by construction (the doorway is carved
   // out of a wall), and the inspector dedupes by cell as it must.
@@ -98,7 +99,7 @@ const worldFrom = blocks => {
   // --- a blocked staircase --------------------------------------------------
   const blocked = worldFrom(plan)
   blocked.set('3,3,2', 'stone_bricks') // directly over the second tread
-  const stuck = await inspector.inspect(stubBot(blocked), new Vec3(0, 0, 0), plan)
+  const stuck = await inspector.inspect(stubBot(blocked), new Vec3(0, 0, 0), plan, { treads: planTreads })
   check('inspector: reports a tread with something on top of it',
     stuck.stairs.blocked >= 1 && !stuck.pass, JSON.stringify(stuck.stairs))
   check('inspector: says which tread', stuck.stairs.where.length > 0)
@@ -128,6 +129,29 @@ const worldFrom = blocks => {
   const attempt = await inspector.repair(bot, before, plan, commander)
   check('inspector: repair reports honestly when nothing changed',
     attempt.fixed === 0 && attempt.remaining > 0, JSON.stringify(attempt))
+
+  // A roof is made of stairs too, and every course of one has the next course
+  // on top. Counting those as staircase treads reported 637 of 903 blocked on a
+  // keep whose stairs were fine. A tread is a stair the PLAN gave headroom to.
+  const roofy = []
+  for (let i = 0; i < 5; i++) {
+    // A gable slope: each stair carries the one above it.
+    roofy.push({ pos: new Vec3(10 + i, 10 + i, 10), name: 'stone_brick_stairs[facing=east,half=bottom]' })
+  }
+  // ...and one genuine tread, with planned air above it.
+  roofy.push({ pos: new Vec3(20, 5, 20), name: 'stone_brick_stairs[facing=east,half=bottom]' })
+  roofy.push({ pos: new Vec3(20, 6, 20), name: 'air' })
+  roofy.push({ pos: new Vec3(20, 7, 20), name: 'air' })
+
+  // Provenance, not shape: the renderer says which cells came from a stairs op.
+  const roofReport = await inspector.inspect(stubBot(worldFrom(roofy)), new Vec3(0, 0, 0), roofy,
+    { treads: [{ x: 20, y: 5, z: 20 }] })
+  check('inspector: only cells the renderer calls treads are audited',
+    roofReport.stairs.treads === 1, `${roofReport.stairs.treads} treads counted`)
+  check('inspector: and the real tread is clear', roofReport.stairs.blocked === 0)
+  const noTreads = await inspector.inspect(stubBot(worldFrom(roofy)), new Vec3(0, 0, 0), roofy)
+  check('inspector: with no tread list, no stairs are claimed',
+    noTreads.stairs.treads === 0)
 
   console.log(failures ? `\n${failures} FAILURES` : '\nall passed')
   process.exit(failures ? 1 : 0)
