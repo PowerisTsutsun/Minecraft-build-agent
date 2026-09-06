@@ -166,6 +166,9 @@ function shapeFor (action, primitives, ctx) {
 const CLOBBER_RATIO = 0.3
 const CLOBBER_MIN_CELLS = 8
 
+// Ops small and deliberate enough that an overlap is untidy rather than wrong.
+const SOFT_CLOBBER_OPS = new Set(['window', 'door', 'blocks', 'stairs', 'spiral', 'column', 'pilaster', 'buttress'])
+
 function renderPlan (plan, primitives, opts = {}) {
   const isKnownBlock = opts.isKnownBlock || (() => true)
   const cells = new Map() // key -> { name, pos, action, order }
@@ -263,6 +266,17 @@ function renderPlan (plan, primitives, opts = {}) {
   const actions = sequence
 
   // Report a later action that buried most of an earlier one, within a phase.
+  //
+  // Only BULK shapes are worth failing a build over. The lint exists to catch a
+  // wall re-emitted across its own doorway; two windows sharing a frame block,
+  // or a door cut where a window was, still leaves a working opening - so those
+  // are reported and built rather than refused.
+  //
+  // The other half of this matters more: an action may have come from a macro,
+  // and the model cannot fix what it did not write. A keep was refused three
+  // times running with byte-identical errors naming macro-generated windows,
+  // because every retry asked the model to correct code. Macro actions are
+  // never fatal; they surface as warnings aimed at whoever maintains the macro.
   actions.forEach((action, i) => {
     const own = footprint[i].size
     const total = own + [...clobbered[i].values()].reduce((a, b) => a + b, 0)
@@ -270,9 +284,17 @@ function renderPlan (plan, primitives, opts = {}) {
     for (const [j, count] of clobbered[i]) {
       if (actions[j].phase !== action.phase) continue
       if (count < total * CLOBBER_RATIO) continue
-      errors.push(
+
+      const message =
         `action ${j + 1} (${actions[j].op} ${actions[j].material || ''}) overwrites ${Math.round(100 * count / total)}% of action ${i + 1} ` +
-        `(${action.op} ${action.material || ''}) - ${count} of its ${total} blocks. Do not re-emit or bury a shape you have already placed.`)
+        `(${action.op} ${action.material || ''}) - ${count} of its ${total} blocks.`
+
+      const fromMacro = actions[j].__macro || action.__macro
+      const smallOps = SOFT_CLOBBER_OPS.has(action.op) || SOFT_CLOBBER_OPS.has(actions[j].op)
+
+      if (fromMacro) warnings.push(`${message} Both came from the ${actions[j].__macro || action.__macro} macro - not something the plan can fix.`)
+      else if (smallOps) warnings.push(`${message} Overlapping openings, which still leaves a working opening.`)
+      else errors.push(`${message} Do not re-emit or bury a shape you have already placed.`)
     }
   })
 

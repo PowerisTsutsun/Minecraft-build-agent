@@ -86,11 +86,15 @@ function tower (a, palette) {
   // Windows: one per face per storey, and a door at the bottom.
   const perStorey = Math.max(0, Math.floor(a.windows_per_storey !== undefined ? a.windows_per_storey : 2))
   const faces = ['north', 'east', 'south', 'west']
+  const doorFace = a.door_face || 'south'
   for (let s = 0; s < floorYs.length + 1; s++) {
     const sy = 2 + s * STOREY + 1
     if (sy + 3 >= height) break
     for (let i = 0; i < perStorey; i++) {
       const face = faces[(i + s) % 4]
+      // The ground storey's window must not land on the doorway - they share a
+      // wall patch and the door wins, leaving a half-framed hole.
+      if (s === 0 && face === doorFace) continue
       carves.push({
         op: 'window', offset: at(0, sy, 0), anchor: 'center', face, along: 0,
         width: 1, height: 2, style: 'arched', frame: trim, glass,
@@ -181,12 +185,17 @@ function hall (a, palette) {
     }
   }
 
+  const doorFace0 = a.door && a.door.face ? a.door.face : 'north'
+  const doorAlong0 = a.door && Number.isFinite(a.door.along) ? a.door.along : Math.floor(width / 2)
   for (let s = 0; s < storeys; s++) {
     const sy = 2 + s * STOREY + 1
     for (let b = 1; b < bays; b++) {
       const along = b * spacing
       if (along <= 1 || along >= depth - 2) continue
       for (const face of ['east', 'west']) {
+        // Never put a ground-storey window where the doorway goes: they share a
+        // wall patch, the door wins, and what is left is a half-framed hole.
+        if (s === 0 && face === doorFace0 && Math.abs(along - doorAlong0) <= 2) continue
         carves.push({
           op: 'window', offset: at(0, sy, 0), anchor: 'corner', face, along,
           width: 1, height: 2, style: 'arched', frame: trim, glass,
@@ -196,8 +205,8 @@ function hall (a, palette) {
     }
   }
 
-  const doorFace = a.door && a.door.face ? a.door.face : 'north'
-  const doorAlong = a.door && Number.isFinite(a.door.along) ? a.door.along : Math.floor(width / 2)
+  const doorFace = doorFace0
+  const doorAlong = doorAlong0
   carves.push({
     op: 'door', offset: at(0, 2, 0), anchor: 'corner', face: doorFace, along: doorAlong,
     width: 2, height: 3, arched: true, frame: trim, door_block: a.door_block || null,

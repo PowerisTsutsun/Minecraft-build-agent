@@ -99,5 +99,42 @@ check('keep: towers of different heights',
   new Set(keep.blocks.filter(b => b.pos.x < 10 || b.pos.x > 35).map(b => b.pos.y)).size > 20)
 check('keep: every id is real', keep.blocks.every(b => real(b.name)))
 
+
+
+// A macro's own actions must never fail a build. The model cannot fix what it
+// did not write: a gothic keep was refused three times running with identical
+// errors naming macro-generated windows, because every retry asked the model to
+// correct code rather than its plan.
+const overlapping = build({
+  summary: 'macro overlap is not fatal',
+  shell: [
+    { op: 'tower', offset: { x: 10, y: 0, z: 10 }, diameter: 9, height: 16, storeys: 2, top: 'cone' },
+    { op: 'tower', offset: { x: 14, y: 0, z: 10 }, diameter: 9, height: 16, storeys: 2, top: 'cone' }
+  ]
+})
+check('macros: two overlapping macros warn rather than fail',
+  (overlapping.errors || []).length === 0 && overlapping.blocks.length > 0,
+  (overlapping.errors || [])[0])
+check('macros: the overlap is still reported',
+  overlapping.warnings.some(w => /macro/.test(w)), overlapping.warnings.slice(0, 2).join(' | '))
+
+// But a plain wall re-emitted over its own doorway is still fatal - that is
+// what the lint is for.
+const reemitted = build({
+  summary: 'a wall over its own door',
+  shell: [
+    { op: 'box', material: 'stone_bricks', offset: { x: 0, y: 0, z: 0 }, anchor: 'corner', width: 9, depth: 9, height: 7, hollow: true },
+    { op: 'box', material: 'deepslate_bricks', offset: { x: 0, y: 0, z: 0 }, anchor: 'corner', width: 9, depth: 9, height: 7, hollow: true }
+  ]
+})
+check('lint: a bulk shape burying another is still refused',
+  (reemitted.errors || []).length > 0, 'the duplicate wall was accepted')
+
+// A tower's own door and its ground-floor window must not share a wall patch.
+const t2 = build({ summary: 'x', shell: [{ op: 'tower', offset: { x: 20, y: 0, z: 20 }, diameter: 9, height: 16, storeys: 2, top: 'cone', door_face: 'south' }] })
+check('tower: the doorway is not overwritten by a window',
+  !t2.warnings.some(w => /door.*overwrites|overwrites.*door/.test(w)),
+  t2.warnings.filter(w => /door/.test(w)).join(' | '))
+
 console.log(failures ? `\n${failures} FAILURES` : '\nall passed')
 process.exit(failures ? 1 : 0)

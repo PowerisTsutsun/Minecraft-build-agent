@@ -488,9 +488,11 @@ function phasedActions (plan, macroPalette) {
       out.push({ action: { ...action, __macroError: err.message }, phase })
       continue
     }
-    for (const sub of parts.shell) out.push({ action: sub, phase: 'shell' })
-    for (const sub of parts.carves) out.push({ action: sub, phase: 'carves' })
-    for (const sub of parts.details) out.push({ action: sub, phase: 'details' })
+    // Tag the provenance so the lint can tell the model's own actions from
+    // ones it has no way to change.
+    for (const sub of parts.shell) out.push({ action: { ...sub, __macro: action.op }, phase: 'shell' })
+    for (const sub of parts.carves) out.push({ action: { ...sub, __macro: action.op }, phase: 'carves' })
+    for (const sub of parts.details) out.push({ action: { ...sub, __macro: action.op }, phase: 'details' })
   }
   return out
 }
@@ -820,6 +822,7 @@ function validatePlan (plan, isKnownBlock) {
         z: intOr(offset.z, 0)
       },
       axis: axes.includes(action.axis) ? action.axis : defaultAxis,
+      ...(action.__macro ? { __macro: action.__macro } : {}),
       anchor: action.anchor === 'corner' || action.anchor === 'center'
         ? action.anchor
         : (CENTRED_BY_DEFAULT.has(action.op) ? 'center' : 'corner'),
