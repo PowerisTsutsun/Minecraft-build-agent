@@ -782,15 +782,18 @@ function window ({
   }
 
   if (frame) {
+    // Frame only where there is wall to replace. The ring around an opening
+    // runs past the edge of a round tower and into the room behind it, and
+    // filling those cells is an attempt to plug the interior - caught by carve
+    // protection, but as 12 dropped blocks per window rather than a clean frame.
     const inShape = (a, level) => shape.some(c => c.a === a && c.level === level)
     for (let a = -1; a <= width; a++) {
       for (let level = -1; level <= height; level++) {
         if (inShape(a, level)) continue
-        if (a < -1 || a > width) continue
-        const ring = a === -1 || a === width || level === -1 || level === height ||
-          !inShape(a, level)
-        if (!ring) continue
-        for (const pos of placeOnFace(start, f, a, level, depth)) solid.push({ pos, name: frame })
+        for (const pos of placeOnFace(start, f, a, level, depth)) {
+          if (isSolid && !isSolid(pos)) continue
+          solid.push({ pos, name: frame })
+        }
       }
     }
   }
@@ -833,10 +836,11 @@ function door ({
   if (frame) {
     for (let a = -1; a <= w; a++) {
       for (let level = -1; level <= h; level++) {
-        const inShape = shape.some(c => c.a === a && c.level === level)
-        if (inShape) continue
-        if (level < -1) continue
-        for (const pos of placeOnFace(start, f, a, level, depth)) solid.push({ pos, name: frame })
+        if (shape.some(c => c.a === a && c.level === level)) continue
+        for (const pos of placeOnFace(start, f, a, level, depth)) {
+          if (isSolid && !isSolid(pos)) continue
+          solid.push({ pos, name: frame })
+        }
       }
     }
   }

@@ -4,6 +4,7 @@ const { MAX_SIZE, MIN_SIZE, MAX_BLOCKS, MAX_ACTIONS } = require('../config')
 const style = require('./style')
 const { baseName, isValidSpec, familyVariant, hasState: hasStateFor } = require('../building/blockspec')
 const render = require('../building/render')
+const macros = require('../building/macros')
 
 // ---------------------------------------------------------------------------
 // Natural language -> structured building actions, via the Claude API.
@@ -36,6 +37,20 @@ The bot builds out of these primitives only:
 - arch: the OPENING under an arch - a rectangle topped by a semicircle, width across and height tall, extruded depth blocks along axis
 - spiral: a helical staircase of the given radius winding up height blocks, one block of rise per tread. Put one inside a hollow cylinder to make a climbable tower. It carves its own headroom, so it punches through any floor it passes
 - blocks: an explicit list of individual blocks, for detail a shape cannot express
+
+MACROS - prefer these. One action becomes a finished building, with floors, a stair that lands on each of them, windows, a door and a roof all worked out for you:
+- tower: diameter, height, storeys, top (cone | battlements | belfry), windows_per_storey, trim_every, spiral
+- hall: width, depth, storeys, roof, bays, corner_posts, door {face, along}
+- curtain_wall: from {x,z}, to {x,z}, height, thickness, slit_every - crenellated with a walkway and arrow slits
+- gatehouse: passage_width, tower_diameter, height, portcullis - two flanking towers with a passage between
+
+DRESSING OPS - for anything the macros do not cover:
+- roof: kind (gable | hip | cone | mansard | pagoda | onion), width, depth, overhang. Always prefer this to a flat slab
+- eaves: a cornice ring one block proud of a footprint. trim_band: one contrasting course. battlements: crenellations
+- plinth: a base course wider than the building. column: a pillar, logs get their axis set. pilaster / buttress: a strip proud of one face
+- window: face, along, width, height, style (plain | arched | mullion) - carves, glazes and frames itself
+- door: face, along, width, height, arched - carves and hangs real doors, all states computed
+- stairs: a straight flight. spiral: a helical one for round towers
 
 Coordinates: every action has an offset {x, y, z} relative to the build origin. x is east, z is south, y is up. y=0 is ground level. Offsets let you compose shapes - a tower is a cylinder with a cone on top, a cottage is a house with a gable over it.
 
@@ -85,7 +100,7 @@ const ACTION_SCHEMA = {
   properties: {
     op: {
       type: 'string',
-      enum: ['floor', 'wall', 'box', 'sphere', 'house', 'cylinder', 'cone', 'pyramid', 'gable', 'arch', 'stairs', 'window', 'door', 'eaves', 'trim_band', 'battlements', 'pilaster', 'buttress', 'plinth', 'column', 'roof', 'spiral', 'blocks']
+      enum: ['floor', 'wall', 'box', 'sphere', 'house', 'cylinder', 'cone', 'pyramid', 'gable', 'arch', 'stairs', 'window', 'door', 'eaves', 'trim_band', 'battlements', 'pilaster', 'buttress', 'plinth', 'column', 'roof', 'tower', 'hall', 'curtain_wall', 'gatehouse', 'spiral', 'blocks']
     },
     material: {
       type: 'string',
@@ -136,6 +151,25 @@ const ACTION_SCHEMA = {
     landing_every: { type: 'integer', description: 'stairs: flat landing after every N steps. Use on anything over 8.' },
     turn: { type: 'string', enum: ['none', 'left', 'right'], description: 'stairs: turn 90 degrees at each landing.' },
     flare: { type: 'integer', description: 'stairs: widen the bottom N steps by one each side. 0-2.' },
+    storeys: { type: 'integer', description: 'tower, hall: how many floors. Each is 5 blocks.' },
+    spiral: { type: 'boolean', description: 'tower: put a staircase inside. Default true.' },
+    top: { type: 'string', enum: ['cone', 'battlements', 'belfry'], description: 'tower: how it finishes.' },
+    windows_per_storey: { type: 'integer', description: 'tower: windows around each storey.' },
+    trim_every: { type: 'integer', description: 'tower: a banding course every N levels.' },
+    bays: { type: 'integer', description: 'hall: how many structural bays along its length.' },
+    corner_posts: { type: 'boolean', description: 'hall: logs at the corners. Default true.' },
+    door: {
+      type: 'object',
+      description: 'hall: where the entrance goes.',
+      properties: { face: { type: 'string', enum: ['north', 'south', 'east', 'west'] }, along: { type: 'integer' } }
+    },
+    from: { type: 'object', description: 'curtain_wall: start point, relative to offset.', properties: { x: { type: 'integer' }, z: { type: 'integer' } } },
+    to: { type: 'object', description: 'curtain_wall: end point, relative to offset.', properties: { x: { type: 'integer' }, z: { type: 'integer' } } },
+    thickness: { type: 'integer', description: 'curtain_wall: how thick. Minimum 2 so it carries a walkway.' },
+    slit_every: { type: 'integer', description: 'curtain_wall: an arrow slit every N blocks.' },
+    passage_width: { type: 'integer', description: 'gatehouse: how wide the gateway is.' },
+    tower_diameter: { type: 'integer', description: 'gatehouse: the flanking towers.' },
+    portcullis: { type: 'boolean', description: 'gatehouse: iron bars across the passage. Default true.' },
     kind: { type: 'string', enum: ['gable', 'hip', 'cone', 'mansard', 'pagoda', 'onion'], description: 'roof only: which roof form.' },
     overhang: { type: 'integer', description: 'roof: how far past the wall it projects. Default 1 - a flush roof looks generated.' },
     gable_fill: { type: 'string', description: 'roof gable: the block that fills the triangular ends.' },
@@ -213,7 +247,7 @@ const PLAN_TOOL = {
 
 // Op tables, shared by the validator and by planToBlocks so the two can never
 // drift into disagreeing about what an op needs.
-const OPS = ['floor', 'wall', 'box', 'sphere', 'house', 'cylinder', 'cone', 'pyramid', 'gable', 'arch', 'stairs', 'window', 'door', 'eaves', 'trim_band', 'battlements', 'pilaster', 'buttress', 'plinth', 'column', 'roof', 'spiral', 'blocks']
+const OPS = ['floor', 'wall', 'box', 'sphere', 'house', 'cylinder', 'cone', 'pyramid', 'gable', 'arch', 'stairs', 'window', 'door', 'eaves', 'trim_band', 'battlements', 'pilaster', 'buttress', 'plinth', 'column', 'roof', 'tower', 'hall', 'curtain_wall', 'gatehouse', 'spiral', 'blocks']
 
 const REQUIRED_DIMS = {
   floor: ['width', 'depth'],
@@ -386,15 +420,40 @@ const CENTRED_BY_DEFAULT = new Set(['sphere', 'cylinder', 'cone', 'spiral'])
 // with the phase it came from. The phase order IS the render order, which is
 // what makes it impossible for a plan to seal its own doorway.
 function phasedActions (plan) {
+  const raw = []
   if (Array.isArray(plan.actions)) {
     // Legacy single-list plans - saved examples, and the older tests.
-    return plan.actions.map(a => ({ action: a, phase: 'shell' }))
+    for (const action of plan.actions) raw.push({ action, phase: 'shell' })
+  } else {
+    for (const phase of ['shell', 'carves', 'details']) {
+      const list = plan[phase]
+      if (!Array.isArray(list)) continue
+      for (const action of list) raw.push({ action, phase })
+    }
   }
+
+  // A macro expands into ordinary actions, each landing in its own phase - a
+  // tower's shaft in shell, its windows in carves, its roof in details -
+  // whichever phase the macro itself was written in. Expanding here means
+  // protection, the overwrite lint, the decorator and the archive all treat
+  // macro output exactly like anything else, and none of them has to know that
+  // macros exist.
   const out = []
-  for (const phase of ['shell', 'carves', 'details']) {
-    const list = plan[phase]
-    if (!Array.isArray(list)) continue
-    for (const action of list) out.push({ action, phase })
+  for (const { action, phase } of raw) {
+    if (!action || !macros.isMacro(action.op)) {
+      out.push({ action, phase })
+      continue
+    }
+    let parts
+    try {
+      parts = macros.expand(action, plan.palette)
+    } catch (err) {
+      out.push({ action: { ...action, __macroError: err.message }, phase })
+      continue
+    }
+    for (const sub of parts.shell) out.push({ action: sub, phase: 'shell' })
+    for (const sub of parts.carves) out.push({ action: sub, phase: 'carves' })
+    for (const sub of parts.details) out.push({ action: sub, phase: 'details' })
   }
   return out
 }
@@ -417,6 +476,10 @@ function validatePlan (plan, isKnownBlock) {
 
     if (!action || typeof action !== 'object') {
       errors.push(`${where}: not an object`)
+      return
+    }
+    if (action.__macroError) {
+      errors.push(`${where}: ${action.op} could not be expanded - ${action.__macroError}`)
       return
     }
     if (!OPS.includes(action.op)) {

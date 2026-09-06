@@ -364,6 +364,27 @@ function orientCells (cells, warnings) {
       continue
     }
 
+    if (/_slab$/.test(base)) {
+      // A slab under a solid is a soffit and belongs at the top of its cell; a
+      // slab with open air above is a step or a cap and belongs at the bottom.
+      cell.name = withState(cell.name, solidAt(cell.pos.offset(0, 1, 0)) && !solidAt(cell.pos.offset(0, -1, 0))
+        ? 'type=top'
+        : 'type=bottom')
+      continue
+    }
+
+    if (/_trapdoor$/.test(base)) {
+      // Hangs on whatever solid is beside it, opening away from that face.
+      const support = SIDES.find(s => solidAt(cell.pos.plus(s.d)))
+      if (support) {
+        const away = SIDES.find(s => s.d.x === -support.d.x && s.d.z === -support.d.z)
+        cell.name = withState(cell.name, `facing=${away.key},half=bottom,open=true`)
+      } else {
+        cell.name = withState(cell.name, 'half=bottom,open=false')
+      }
+      continue
+    }
+
     if (/_wall$/.test(base)) {
       const on = SIDES.filter(s => solidAt(cell.pos.plus(s.d)))
       const parts = on.map(s => `${s.key}=low`)
@@ -373,7 +394,10 @@ function orientCells (cells, warnings) {
     }
 
     // Everything else that cares about orientation and did not get one.
-    if (/_stairs$|_slab$|_log$|_door$|_trapdoor$|^chain$/.test(base)) unstated++
+    if (/_stairs$|_log$|_door$|^chain$/.test(base)) {
+      unstated++
+      if (unstated <= 3) warnings.push(`a ${base} at (${cell.pos.x}, ${cell.pos.y}, ${cell.pos.z}) is in its default orientation`)
+    }
   }
 
   if (unstated) {
