@@ -5,6 +5,7 @@ const style = require('./style')
 const { baseName, isValidSpec, familyVariant, hasState: hasStateFor } = require('../building/blockspec')
 const render = require('../building/render')
 const macros = require('../building/macros')
+const paletteLib = require('../building/palette')
 
 // ---------------------------------------------------------------------------
 // Natural language -> structured building actions, via the Claude API.
@@ -83,6 +84,8 @@ MAKE IT LOOK BUILT. The bot places every block with a single server command, so 
 - Cut openings. Windows, doorways, arcades. See CARVING above.
 - Use gable or cone for anything with a roof. Flat slabs read as unfinished.
 - Suggested vocabulary: stone_bricks, cobblestone, deepslate_bricks, polished_andesite, oak_planks, spruce_planks, dark_oak_planks, oak_log, stripped_oak_log, glass, glass_pane, white_wool, sandstone, bricks, mossy_cobblestone, stone_brick_stairs, cobblestone_wall, torch, lantern, glowstone.
+
+PALETTE. Name one in the palette field - medieval_stone, nordic, gothic, desert, japanese, dwarven, fantasy_glow, brick_townhouse - and then write slot names instead of block ids anywhere a material is asked for: wall, trim, roof, accent, floor, glass, base_rough, upper. That keeps a build coherent and lets one word restyle the whole thing. Override an individual slot inline if you need to, and set palette.wall.weathering to control how much of the wall is swapped for rougher variants. Real block ids still work everywhere.
 
 Materials must be valid Minecraft block ids in snake_case without the minecraft: prefix. Never invent a block id.
 
@@ -211,6 +214,21 @@ const PLAN_TOOL = {
         type: 'string',
         description: 'One short sentence describing what will be built, for the player to read in chat.'
       },
+      palette: {
+        type: 'object',
+        description: 'The blocks this build is made of. Name one of the shipped palettes and any material in the plan may then be a slot name - "wall", "trim", "roof", "accent", "floor", "glass", "base_rough", "upper" - instead of a block id. Override individual slots inline.',
+        properties: {
+          name: { type: 'string', enum: ['medieval_stone', 'nordic', 'gothic', 'desert', 'japanese', 'dwarven', 'fantasy_glow', 'brick_townhouse'] },
+          wall: { type: 'object', properties: { base: { type: 'string' }, variants: { type: 'array', items: { type: 'string' } }, weathering: { type: 'number' } } },
+          trim: { type: 'string' },
+          roof: { type: 'string' },
+          accent: { type: 'string' },
+          floor: { type: 'string' },
+          glass: { type: 'string' },
+          base_rough: { type: 'string' },
+          upper: { type: 'string' }
+        }
+      },
       decor: {
         type: 'object',
         description: 'Which set of builder habits to apply after the shell is carved. The decorator finds its own surfaces - you do not place any of it yourself.',
@@ -292,6 +310,13 @@ const CELL_REACH = 96
 // made of - and if it names the stair block itself, the fill is derived back.
 const WOODS = /^(oak|spruce|birch|jungle|acacia|dark_oak|mangrove|cherry|pale_oak|bamboo|crimson|warped)$/
 
+// Vanilla is inconsistent about which stone variants get a stairs block:
+// sandstone and smooth_sandstone have one, cut_sandstone does not; deepslate
+// tiles and bricks do, plain deepslate does not. So the search widens from the
+// exact family outward, stripping the qualifier last - cut_sandstone finds
+// sandstone_stairs, which is the right-looking answer rather than a failure.
+const QUALIFIERS = /^(cut|smooth|polished|chiseled|cracked|mossy)_/
+
 function stairsFor (material, isKnownBlock) {
   if (/_stairs$/.test(baseName(material))) return material
   const b = baseName(material)
@@ -299,9 +324,21 @@ function stairsFor (material, isKnownBlock) {
     b.replace(/_planks$/, '') + '_stairs',
     b.replace(/_bricks$/, '_brick') + '_stairs',
     b.replace(/_tiles$/, '_tile') + '_stairs',
+    b.replace(/s$/, '') + '_stairs', // bricks -> brick_stairs
+    b.replace(/_log$|_stem$/, '') + '_stairs', // stripped_oak_log -> oak_stairs
+    b.replace(/^stripped_/, '').replace(/_log$|_stem$/, '') + '_stairs',
     b + '_stairs'
   ]
-  return guesses.find(g => isKnownBlock(g)) || null
+  if (QUALIFIERS.test(b)) {
+    const plain = b.replace(QUALIFIERS, '')
+    guesses.push(plain + '_stairs', plain.replace(/_bricks$/, '_brick') + '_stairs')
+  }
+  const found = guesses.find(g => isKnownBlock(g))
+  if (found) return found
+  // Nothing in the family has stairs (plain deepslate, most terracotta). A
+  // near-miss in the right colour beats refusing to build - the caller only
+  // ever wants "something stair-shaped that suits this material".
+  return isKnownBlock('stone_brick_stairs') ? 'stone_brick_stairs' : null
 }
 
 function fillFor (tread, isKnownBlock) {
@@ -419,7 +456,7 @@ const CENTRED_BY_DEFAULT = new Set(['sphere', 'cylinder', 'cone', 'spiral'])
 // Flatten { shell, carves, details } into one ordered list, tagging each action
 // with the phase it came from. The phase order IS the render order, which is
 // what makes it impossible for a plan to seal its own doorway.
-function phasedActions (plan) {
+function phasedActions (plan, macroPalette) {
   const raw = []
   if (Array.isArray(plan.actions)) {
     // Legacy single-list plans - saved examples, and the older tests.
@@ -446,7 +483,7 @@ function phasedActions (plan) {
     }
     let parts
     try {
-      parts = macros.expand(action, plan.palette)
+      parts = macros.expand(action, macroPalette)
     } catch (err) {
       out.push({ action: { ...action, __macroError: err.message }, phase })
       continue
@@ -460,14 +497,31 @@ function phasedActions (plan) {
 
 function validatePlan (plan, isKnownBlock) {
   const errors = []
+  const paletteWarnings = []
 
   if (!plan || typeof plan !== 'object') return { errors: ['plan was not an object'] }
 
-  const incoming = phasedActions(plan)
+  // Macros read the palette directly so their component actions carry real
+  // block ids; slot resolution below then leaves them alone.
+  const macroPre = plan.palette !== undefined ? paletteLib.build(plan.palette, isKnownBlock) : null
+  const incoming = phasedActions(plan, macroPre ? macroPre.table : null)
   if (!incoming.length) return { errors: ['plan contained no actions'] }
   if (incoming.length > MAX_ACTIONS) {
     return { errors: [`plan had ${incoming.length} actions, which is more than the ${MAX_ACTIONS} this bot will run at once`] }
   }
+
+  // The palette resolves slot names, so it has to exist before any material is
+  // checked against the registry - otherwise "wall" is rejected as an unknown
+  // block rather than resolved to one.
+  let palette = null
+  if (plan.palette !== undefined) {
+    const built = paletteLib.build(plan.palette, isKnownBlock)
+    if (built) {
+      palette = built
+      for (const w of built.warnings) paletteWarnings.push(w)
+    }
+  }
+  const slot = m => paletteLib.resolve(palette, m)
 
   const clean = []
 
@@ -492,7 +546,7 @@ function validatePlan (plan, isKnownBlock) {
     // mistake: an action that scatters twenty lanterns is one material and
     // twenty coordinates, and the model quite reasonably wrote it that way and
     // had the whole castle rejected for it.
-    const sharedMaterial = typeof action.material === 'string' ? action.material : null
+    const sharedMaterial = typeof action.material === 'string' ? slot(action.material) : null
     if (sharedMaterial !== null && !isKnownBlock(sharedMaterial)) {
       errors.push(`${where}: "${action.material}" is not a block this server knows`)
       return
@@ -559,7 +613,7 @@ function validatePlan (plan, isKnownBlock) {
           errors.push(`${where}: cell ${c + 1} is not an object`)
           return
         }
-        const cellMaterial = typeof cell.material === 'string' ? cell.material : sharedMaterial
+        const cellMaterial = typeof cell.material === 'string' ? slot(cell.material) : sharedMaterial
         if (cellMaterial === null) {
           errors.push(`${where}: cell ${c + 1} has no material, and the action names none either`)
           return
@@ -601,8 +655,8 @@ function validatePlan (plan, isKnownBlock) {
       if (action.op === 'roof') {
         dressing.kind = ['gable', 'hip', 'cone', 'mansard', 'pagoda', 'onion'].includes(action.kind) ? action.kind : 'gable'
         dressing.overhang = Number.isFinite(action.overhang) ? Math.max(0, Math.min(4, Math.floor(action.overhang))) : 1
-        dressing.gableFill = typeof action.gable_fill === 'string' ? action.gable_fill : null
-        dressing.ridge = typeof action.ridge === 'string' ? action.ridge : null
+        dressing.gableFill = typeof action.gable_fill === 'string' ? slot(action.gable_fill) : null
+        dressing.ridge = typeof action.ridge === 'string' ? slot(action.ridge) : null
         // A sloped roof wants stairs; a cone is made of full blocks.
         if (dressing.kind !== 'cone') {
           const st = stairsFor(sharedMaterial, isKnownBlock)
@@ -613,7 +667,7 @@ function validatePlan (plan, isKnownBlock) {
         }
       }
       if (action.op === 'battlements') {
-        dressing.cap = typeof action.cap === 'string' ? action.cap
+        dressing.cap = typeof action.cap === 'string' ? slot(action.cap)
           : familyVariant(sharedMaterial, 'slab', isKnownBlock)
       }
       if (action.op === 'buttress') {
@@ -653,24 +707,24 @@ function validatePlan (plan, isKnownBlock) {
           depth: Math.max(1, Math.floor(action.footprint.depth))
         }
       }
-      opening.frame = typeof action.frame === 'string' ? action.frame : null
-      opening.lintel = typeof action.lintel === 'string' ? action.lintel : null
+      opening.frame = typeof action.frame === 'string' ? slot(action.frame) : null
+      opening.lintel = typeof action.lintel === 'string' ? slot(action.lintel) : null
 
       if (action.op === 'window') {
         opening.style = ['plain', 'arched', 'mullion'].includes(action.style) ? action.style : 'plain'
-        opening.glass = typeof action.glass === 'string' ? action.glass
+        opening.glass = typeof action.glass === 'string' ? slot(action.glass)
           : (typeof action.material === 'string' ? action.material : 'glass_pane')
         if (opening.frame && !opening.lintel) {
           opening.lintel = familyVariant(opening.frame, 'slab', isKnownBlock)
         }
-        opening.sill = typeof action.sill === 'string' ? action.sill
+        opening.sill = typeof action.sill === 'string' ? slot(action.sill)
           : (opening.frame ? familyVariant(opening.frame, 'stairs', isKnownBlock) : null)
         if (opening.sill && !hasStateFor(opening.sill)) {
           opening.sill = `${opening.sill}[half=bottom,facing=${opening.face}]`
         }
       } else {
         opening.arched = action.arched === true
-        opening.doorBlock = typeof action.door_block === 'string' ? action.door_block : null
+        opening.doorBlock = typeof action.door_block === 'string' ? slot(action.door_block) : null
         if (opening.frame && !opening.lintel) {
           opening.lintel = familyVariant(opening.frame, 'slab', isKnownBlock)
         }
@@ -689,15 +743,15 @@ function validatePlan (plan, isKnownBlock) {
     let helix
     if (action.op === 'spiral') {
       helix = {}
-      const tread = stairsFor(action.material, isKnownBlock)
+      const tread = stairsFor(sharedMaterial, isKnownBlock)
       if (!tread) {
         errors.push(`${where}: "${action.material}" is not a stairs block and I could not find one for it`)
         return
       }
       helix.material = tread
-      helix.column = action.column || fillFor(tread, isKnownBlock)
-      helix.slab = action.slab || familyVariant(helix.column, 'slab', isKnownBlock) || helix.column
-      helix.railing = typeof action.railing === 'string' ? action.railing : null
+      helix.column = (typeof action.column === 'string' ? slot(action.column) : null) || fillFor(tread, isKnownBlock)
+      helix.slab = (typeof action.slab === 'string' ? slot(action.slab) : null) || familyVariant(helix.column, 'slab', isKnownBlock) || helix.column
+      helix.railing = typeof action.railing === 'string' ? slot(action.railing) : null
       helix.risePerTread = action.rise_per_tread === 0.5 ? 0.5 : 1
       const extras = [helix.column, helix.slab, helix.railing].filter(Boolean)
       const unknown = extras.find(m => !isKnownBlock(m))
@@ -710,13 +764,13 @@ function validatePlan (plan, isKnownBlock) {
     let stair
     if (action.op === 'stairs') {
       stair = {}
-      const tread = stairsFor(action.tread || action.material, isKnownBlock)
+      const tread = stairsFor(slot(action.tread || action.material), isKnownBlock)
       if (!tread) {
-        errors.push(`${where}: "${action.tread || action.material}" is not a stairs block and I could not find one for it`)
+        errors.push(`${where}: "${slot(action.tread || action.material)}" is not a stairs block and I could not find one for it`)
         return
       }
       stair.tread = tread
-      stair.fill = action.fill || fillFor(tread, isKnownBlock)
+      stair.fill = (typeof action.fill === 'string' ? slot(action.fill) : null) || fillFor(tread, isKnownBlock)
       stair.ascent = action.ascent === '-' ? '-' : '+'
       stair.sides = ['both', 'left', 'right', 'none'].includes(action.sides) ? action.sides : 'both'
       stair.lights = ['torch', 'lantern', 'none'].includes(action.lights) ? action.lights : 'torch'
@@ -724,7 +778,7 @@ function validatePlan (plan, isKnownBlock) {
       stair.lightEvery = Number.isFinite(action.light_every) ? Math.max(0, Math.floor(action.light_every)) : 4
       stair.landingEvery = Number.isFinite(action.landing_every) ? Math.max(0, Math.floor(action.landing_every)) : 0
       stair.turn = ['none', 'left', 'right'].includes(action.turn) ? action.turn : 'none'
-      stair.stringer = typeof action.stringer === 'string' ? action.stringer : null
+      stair.stringer = typeof action.stringer === 'string' ? slot(action.stringer) : null
 
       if (action.rise < 2) {
         errors.push(`${where}: a flight needs a rise of at least 2 (got ${action.rise})`)
@@ -742,7 +796,7 @@ function validatePlan (plan, isKnownBlock) {
 
       const extras = [stair.fill, stair.stringer].filter(Boolean)
       if (Array.isArray(action.stringer_pattern) && action.stringer_pattern.length) {
-        stair.stringerPattern = action.stringer_pattern
+        stair.stringerPattern = action.stringer_pattern.map(slot)
         extras.push(...action.stringer_pattern)
       }
       const unknown = extras.find(m => !isKnownBlock(m))
@@ -757,7 +811,9 @@ function validatePlan (plan, isKnownBlock) {
 
     clean.push({
       op: action.op,
-      material: action.material,
+      // sharedMaterial, not action.material: the raw value may be a palette
+      // slot name, and storing that ships the literal string "wall" as a block.
+      material: sharedMaterial,
       offset: {
         x: intOr(offset.x, 0),
         y: intOr(offset.y, 0),
@@ -841,6 +897,8 @@ function validatePlan (plan, isKnownBlock) {
 
   return {
     summary: typeof plan.summary === 'string' ? plan.summary : 'a build',
+    palette,
+    paletteWarnings,
     decor,
     actions: rest.concat(stairs),
     dropped: clean.length - deduped.length,

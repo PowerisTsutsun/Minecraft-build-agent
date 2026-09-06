@@ -4,6 +4,7 @@ const { Vec3 } = require('vec3')
 const { baseName, hasState, withState } = require('./blockspec')
 const { MAX_BLOCKS } = require('../config')
 const { decorate } = require('./decorate')
+const paletteLib = require('./palette')
 
 // ---------------------------------------------------------------------------
 // Plan -> cells.
@@ -292,6 +293,16 @@ function renderPlan (plan, primitives, opts = {}) {
       warnings.push(`action ${filler + 1} (${actions[filler].op}) tried to fill ${count} block${count === 1 ? '' : 's'} that action ${carver + 1} had opened up - those blocks were dropped, the opening stands`)
     }
   }
+
+  // Weathering last, so decorator output weathers with everything else. The
+  // seed is a hash of the plan: the same plan always produces the same wall,
+  // which is what keeps command mode's "already correct" skip meaningful.
+  if (plan.palette) {
+    const seed = paletteLib.hash(JSON.stringify(plan.actions))
+    const swapped = paletteLib.weather(cells, plan.palette, seed)
+    if (swapped) console.log(`[render] weathered ${swapped} wall cells`)
+  }
+  for (const w of plan.paletteWarnings || []) warnings.push(w)
 
   orientCells(cells, warnings)
 

@@ -28,9 +28,12 @@ function odd (n) {
   return v % 2 === 0 ? v + 1 : v
 }
 
+// A palette slot may be a plain id or a { base, variants } object.
 function pick (palette, slot, fallback) {
   const v = palette && palette[slot]
-  return typeof v === 'string' ? v : fallback
+  if (typeof v === 'string') return v
+  if (v && typeof v === 'object' && typeof v.base === 'string') return v.base
+  return fallback
 }
 
 // --- tower -----------------------------------------------------------------
