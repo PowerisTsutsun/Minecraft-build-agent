@@ -1,7 +1,0 @@
-# Slash commands run after this template is placed, one per line.
-# ~x ~y ~z are relative to the template origin.
-# Blocks alone do not make a farm work - the entities have to be here too.
-#
-# example:
-# /summon minecraft:villager ~4 ~2 ~4 {VillagerData:{profession:"minecraft:farmer",level:2}}
-# /summon minecraft:zombie ~4 ~5 ~4 {NoAI:1b,IsBaby:0b,Silent:1b}
