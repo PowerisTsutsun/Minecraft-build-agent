@@ -308,6 +308,7 @@ async function make (bot, request, requester) {
     if (out.errors.length) { run.attempt(attemptNo, raw, out.errors); return { errors: out.errors, plan } }
     run.attempt(attemptNo, raw, [])
     rendered = { plan, out }
+    lastRaw = raw
     return { errors: [], plan, out }
   }
 
@@ -315,9 +316,39 @@ async function make (bot, request, requester) {
   const fast = /(^|\s)--fast(\s|$)/.test(request)
   const cleanRequest = request.replace(/(^|\s)--fast(\s|$)/, ' ').trim()
 
+  // The detailer's actions go back through exactly the same gate as everything
+  // else - validation, protection, the lints. A last pass that could bypass
+  // them would be the one place in the pipeline where unchecked model output
+  // reaches the world.
+  let lastRaw = null
+  const reRender = extraDetails => {
+    if (!lastRaw) return null
+    const merged = {
+      ...lastRaw,
+      details: [...(lastRaw.details || []), ...extraDetails]
+    }
+    const plan = llm.validatePlan(merged, name => isKnownBlock(bot, name))
+    if (plan.errors.length) {
+      console.error('[detailer] rejected:', plan.errors.slice(0, 2).join('; '))
+      return null
+    }
+    try {
+      const out = llm.renderPlan(plan, primitives, { isKnownBlock: n => isKnownBlock(bot, n) })
+      if (out.errors.length) {
+        console.error('[detailer] rejected:', out.errors[0])
+        return null
+      }
+      return { plan, out }
+    } catch (err) {
+      console.error('[detailer] rejected:', err.message)
+      return null
+    }
+  }
+
   let attempt
   try {
     attempt = await pipeline.runMake({
+      reRender,
       request: cleanRequest,
       check,
       archive: run,
@@ -344,6 +375,7 @@ async function make (bot, request, requester) {
 
   if (attempt.attempts > 1) say(bot, `(took ${attempt.attempts} attempts - I sent the problems back and it fixed them.)`)
   if (attempt.revised) say(bot, `Revised it after a look: ${attempt.problems.length} thing${attempt.problems.length === 1 ? '' : 's'} to fix.`)
+  if (attempt.detailed) say(bot, `Added ${attempt.detailed} finishing touch${attempt.detailed === 1 ? '' : 'es'}${attempt.detailNote ? ' - ' + attempt.detailNote : ''}`)
   for (const problem of attempt.problems) console.log(`[critic] ${problem}`)
   if (plan.reordered) console.log('[!make] moved the staircase to the end of the plan')
   if (plan.dropped) console.log(`[!make] dropped ${plan.dropped} repeated action(s)`)

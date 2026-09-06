@@ -3,6 +3,7 @@
 const llm = require('../commands/llm')
 const views = require('./views')
 const critic = require('./critic')
+const detailer = require('./detailer')
 
 // ---------------------------------------------------------------------------
 // The !make pipeline, as an explicit sequence of roles.
@@ -63,6 +64,33 @@ async function runMake (opts) {
     } catch (err) {
       console.error('[critic] skipped:', err.message)
       state.criticError = err.message
+    }
+  }
+
+  // --- detailer -----------------------------------------------------------
+  // Last, and only ever additive: by this point the massing has been through
+  // the critic and a revision, so a pass that could move walls would put the
+  // build back before both.
+  if (!fast && client && opts.reRender) {
+    try {
+      const extra = await detailer.detail(client, model, out.blocks, request, plan.summary)
+      if (extra.details.length) {
+        const merged = opts.reRender(extra.details)
+        if (merged) {
+          out = merged.out
+          plan = merged.plan
+          state.detailed = extra.details.length
+          state.detailNote = extra.note
+          if (archive) {
+            archive.note('details.json', JSON.stringify(extra, null, 2) + '\n')
+            views.writeViews(archive.dir + '/detailed', out.blocks)
+          }
+        } else {
+          state.detailRejected = true
+        }
+      }
+    } catch (err) {
+      console.error('[detailer] skipped:', err.message)
     }
   }
 
