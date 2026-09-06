@@ -9,6 +9,7 @@ const { loadSchematic, schematicToBlocks, listSchematics } = require('../buildin
 const llm = require('./llm')
 const style = require('./style')
 const plans = require('../plans')
+const pipeline = require('../pipeline')
 const { configureMovements, isKnownBlock } = require('../bot')
 const commander = require('../building/commander')
 const { SCAFFOLD_BLOCK, MAX_SIZE, MAX_BLOCKS, DEFAULTS, BUILD_MODE } = require('../config')
@@ -310,24 +311,40 @@ async function make (bot, request, requester) {
     return { errors: [], plan, out }
   }
 
+  // --fast skips the critic, which is the only step that costs an extra call.
+  const fast = /(^|\s)--fast(\s|$)/.test(request)
+  const cleanRequest = request.replace(/(^|\s)--fast(\s|$)/, ' ').trim()
+
   let attempt
   try {
-    attempt = await llm.requestPlan(request, check)
+    attempt = await pipeline.runMake({
+      request: cleanRequest,
+      check,
+      archive: run,
+      fast,
+      client: fast ? null : llm.getClient(),
+      model: llm.MODEL,
+      say: text => say(bot, text),
+      rendered: () => rendered
+    })
   } catch (err) {
     return say(bot, `Couldn't get a plan: ${err.message}`)
   }
 
-  if (attempt.errors.length || !rendered) {
-    run.rejected(attempt.plan, attempt.errors)
+  if (attempt.failed || !rendered) {
+    run.rejected(attempt.plan, attempt.failed || ['no plan'])
     console.error('[!make] rejected plan:', JSON.stringify(attempt.plan, null, 2))
-    say(bot, `That plan didn't check out after ${attempt.attempts} attempt${attempt.attempts === 1 ? '' : 's'}: ${attempt.errors.slice(0, 2).join('; ')}`)
+    say(bot, `That plan didn't check out after ${attempt.attempts} attempt${attempt.attempts === 1 ? '' : 's'}: ${(attempt.failed || []).slice(0, 2).join('; ')}`)
     return
   }
 
-  const { plan, out } = rendered
+  const plan = attempt.plan
+  const out = attempt.out
   const blocks = out.blocks
 
   if (attempt.attempts > 1) say(bot, `(took ${attempt.attempts} attempts - I sent the problems back and it fixed them.)`)
+  if (attempt.revised) say(bot, `Revised it after a look: ${attempt.problems.length} thing${attempt.problems.length === 1 ? '' : 's'} to fix.`)
+  for (const problem of attempt.problems) console.log(`[critic] ${problem}`)
   if (plan.reordered) console.log('[!make] moved the staircase to the end of the plan')
   if (plan.dropped) console.log(`[!make] dropped ${plan.dropped} repeated action(s)`)
   for (const w of out.warnings) console.log(`[!make] ${w}`)

@@ -931,4 +931,4 @@ function planToBlocks (plan, primitives, opts) {
   return render.renderPlan(plan, primitives, opts).blocks
 }
 
-module.exports = { requestPlan, validatePlan, planToBlocks, renderPlan, MODEL, SYSTEM_PROMPT }
+module.exports = { requestPlan, validatePlan, planToBlocks, renderPlan, getClient, MODEL, SYSTEM_PROMPT }
