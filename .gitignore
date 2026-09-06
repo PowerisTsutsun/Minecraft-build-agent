@@ -1,0 +1,5 @@
+node_modules/
+plans/
+.build-undo.json
+.build-origin.json
+*.log

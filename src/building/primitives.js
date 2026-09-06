@@ -1,0 +1,619 @@
+'use strict'
+
+const { Vec3 } = require('vec3')
+const { baseName, hasState, withState } = require('./blockspec')
+
+// Circles are rasterised against (r + HALF)^2, not r^2.
+//
+// A bare r^2 test keeps only cells whose CENTRE is inside the circle, which
+// pinches the cardinal extremes to a single block: diameter 5 comes out
+// 1,3,5,3,1 - visibly pointy, and not what any Minecraft circle chart shows.
+// Testing against (r + 0.5)^2 asks whether the cell's near edge is inside, and
+// reproduces the conventional widths exactly: 3,5,5,5,3 at d5, 3,5,7,7,7,5,3
+// at d7, 5,7,9,9,9,9,9,7,5 at d9. The bounding box is unchanged - only the
+// corners of the silhouette fill out.
+const HALF = 0.5
+const circleLimit = r => (r + HALF) * (r + HALF)
+
+// The direction a stair ascends, from a vector pointing up-slope.
+//
+// facing is the side the RAISED half sits on (measured - see
+// test/stair-facing-probe.js), so for a roof the raised half must point toward
+// the ridge: that is what makes each stair's top edge meet the underside of the
+// next one up and reads as a continuous 45-degree surface. Pointing them the
+// other way leaves a sawtooth.
+function ascentFacing (dx, dz) {
+  return Math.abs(dx) >= Math.abs(dz)
+    ? (dx > 0 ? 'east' : 'west')
+    : (dz > 0 ? 'south' : 'north')
+}
+
+// Orient a stairs material, leaving any other block - and any material whose
+// state the caller chose explicitly - completely alone.
+function orientStairs (material, dx, dz, half = 'bottom') {
+  if (!/_stairs$/.test(baseName(material)) || hasState(material)) return material
+  return withState(material, `facing=${ascentFacing(dx, dz)},half=${half}`)
+}
+
+// ---------------------------------------------------------------------------
+// Primitive shape generators.
+//
+// Every generator returns a flat array of { pos: Vec3, name: string } in
+// RELATIVE coordinates (origin-anchored, y=0 is the structure's floor). None
+// of them touch the bot or the world - they are pure functions, which is what
+// makes dry-run mode and unit-testing them possible.
+//
+// Ordering matters more than it looks: the placer walks this array in order,
+// and mineflayer can only place a block against an already-solid neighbor. So
+// every generator emits bottom-up, and anything that could strand the bot over
+// a hole (roofs, ceilings) is ordered outermost-ring-first so there is always
+// an adjacent placed block to stand next to.
+// ---------------------------------------------------------------------------
+
+// Sorts a horizontal slab from its perimeter inward, so the bot builds a ring
+// and then fills toward the middle rather than walling itself off from the
+// blocks it still has to reach.
+function outsideIn (blocks, width, depth) {
+  const cx = (width - 1) / 2
+  const cz = (depth - 1) / 2
+  return blocks.slice().sort((a, b) => {
+    const da = Math.max(Math.abs(a.pos.x - cx), Math.abs(a.pos.z - cz))
+    const db = Math.max(Math.abs(b.pos.x - cx), Math.abs(b.pos.z - cz))
+    return db - da
+  })
+}
+
+// A solid horizontal slab, width (x) by depth (z), at height y.
+function floor ({ width, depth, material, y = 0 }) {
+  const blocks = []
+  for (let x = 0; x < width; x++) {
+    for (let z = 0; z < depth; z++) {
+      blocks.push({ pos: new Vec3(x, y, z), name: material })
+    }
+  }
+  return outsideIn(blocks, width, depth)
+}
+
+// A flat vertical wall `length` long and `height` tall, running along either
+// the x or the z axis.
+function wall ({ length, height, material, axis = 'x', y = 0 }) {
+  const blocks = []
+  for (let h = 0; h < height; h++) {
+    for (let i = 0; i < length; i++) {
+      const pos = axis === 'z' ? new Vec3(0, y + h, i) : new Vec3(i, y + h, 0)
+      blocks.push({ pos, name: material })
+    }
+  }
+  return blocks
+}
+
+// A box. `hollow` (the default) gives you four walls plus floor and ceiling -
+// a room. `hollow: false` gives a solid cuboid.
+function box ({ width, depth, height, material, hollow = true, y = 0 }) {
+  const blocks = []
+
+  for (let h = 0; h < height; h++) {
+    const layer = []
+    const isCap = h === 0 || h === height - 1
+    for (let x = 0; x < width; x++) {
+      for (let z = 0; z < depth; z++) {
+        const isPerimeter = x === 0 || x === width - 1 || z === 0 || z === depth - 1
+        if (hollow && !isCap && !isPerimeter) continue
+        layer.push({ pos: new Vec3(x, y + h, z), name: material })
+      }
+    }
+    // Only the flat caps need the outside-in treatment; a perimeter ring is
+    // already self-supporting in any order.
+    blocks.push(...(isCap ? outsideIn(layer, width, depth) : layer))
+  }
+
+  return blocks
+}
+
+// A sphere of the given radius, centred horizontally on the origin and sitting
+// with its lowest point at y. `hollow` keeps only the shell.
+//
+// Shell test: a voxel is on the shell if it is inside the radius but at least
+// one of its 6 neighbours is outside. Comparing against (r - 1) instead would
+// leave diagonal gaps you can see daylight through.
+function sphere ({ radius, material, hollow = true, y = 0 }) {
+  const blocks = []
+  const r = Math.max(1, Math.floor(radius))
+  const limit = circleLimit(r)
+  const inside = (x, yy, z) => (x * x + yy * yy + z * z) <= limit
+
+  for (let dy = -r; dy <= r; dy++) {
+    const layer = []
+    for (let dx = -r; dx <= r; dx++) {
+      for (let dz = -r; dz <= r; dz++) {
+        if (!inside(dx, dy, dz)) continue
+        if (hollow) {
+          const solidShell =
+            inside(dx + 1, dy, dz) && inside(dx - 1, dy, dz) &&
+            inside(dx, dy + 1, dz) && inside(dx, dy - 1, dz) &&
+            inside(dx, dy, dz + 1) && inside(dx, dy, dz - 1)
+          if (solidShell) continue
+        }
+        // Shift so the sphere's bottom rests at y and its centre sits at
+        // (r, r) in x/z - keeps every coordinate non-negative, matching the
+        // other primitives' "origin is the near-bottom-left corner" contract.
+        layer.push({ pos: new Vec3(dx + r, y + dy + r, dz + r), name: material })
+      }
+    }
+    blocks.push(...outsideIn(layer, r * 2 + 1, r * 2 + 1))
+  }
+
+  return blocks
+}
+
+// The original procedural house, preserved from the pre-refactor bot: floor,
+// four walls with a doorway, and a flat roof one course above the walls.
+function house ({ width, depth, height, wallBlock, floorBlock, roofBlock, doorGap = 2 }) {
+  const blocks = floor({ width, depth, material: floorBlock, y: 0 })
+
+  const doorX = Math.floor(width / 2)
+  for (let y = 1; y <= height; y++) {
+    for (let x = 0; x < width; x++) {
+      for (let z = 0; z < depth; z++) {
+        const isPerimeter = x === 0 || x === width - 1 || z === 0 || z === depth - 1
+        if (!isPerimeter) continue
+        if (x === doorX && z === 0 && y <= doorGap) continue // doorway
+        blocks.push({ pos: new Vec3(x, y, z), name: wallBlock })
+      }
+    }
+  }
+
+  return blocks.concat(floor({ width, depth, material: roofBlock, y: height + 1 }))
+}
+
+
+// A vertical cylinder (or a horizontal one - `axis` is the direction it runs).
+// Round towers, pillars, wells, tunnels. `hollow` keeps only the wall, which is
+// what makes it a tower rather than a very expensive pillar.
+//
+// The shell test is the same one the sphere uses and for the same reason:
+// "inside the radius but with a neighbour outside it" keeps the wall connected
+// where "inside r but outside r-1" leaves diagonal gaps you can see through.
+function cylinder ({ radius, height, material, hollow = true, axis = 'y', y = 0 }) {
+  const r = Math.max(1, Math.floor(radius))
+  const len = Math.max(1, Math.floor(height))
+  const limit = circleLimit(r)
+  const inside = (a, b) => (a * a + b * b) <= limit
+  const blocks = []
+
+  for (let i = 0; i < len; i++) {
+    const layer = []
+    for (let da = -r; da <= r; da++) {
+      for (let db = -r; db <= r; db++) {
+        if (!inside(da, db)) continue
+        if (hollow && inside(da + 1, db) && inside(da - 1, db) && inside(da, db + 1) && inside(da, db - 1)) continue
+        // Shift so nothing is negative: the shape's own corner is the origin,
+        // matching every other primitive's contract.
+        const pos = axis === 'x' ? new Vec3(i, y + da + r, db + r)
+          : axis === 'z' ? new Vec3(da + r, y + db + r, i)
+            : new Vec3(da + r, y + i, db + r)
+        layer.push({ pos, name: material })
+      }
+    }
+    blocks.push(...(axis === 'y' ? outsideIn(layer, r * 2 + 1, r * 2 + 1) : layer))
+  }
+
+  return blocks
+}
+
+// A cone: a disc of `radius` at the bottom tapering to a point at `height`.
+// This is the witch-hat / turret roof, and it is the single shape that stops a
+// round tower reading as a pipe.
+//
+// Hollow keeps the sloping surface only: a cell is on it when it is inside this
+// level's disc but NOT inside the level above's, i.e. it is the top of its own
+// column. Adding the rim band keeps steep cones watertight.
+function cone ({ radius, height, material, hollow = true, y = 0 }) {
+  const r = Math.max(1, Math.floor(radius))
+  const h = Math.max(1, Math.floor(height))
+  const blocks = []
+
+  const radiusAt = level => r * (1 - level / h)
+
+  for (let level = 0; level < h; level++) {
+    const rNow = radiusAt(level)
+    const rNext = radiusAt(level + 1)
+    const layer = []
+    for (let dx = -r; dx <= r; dx++) {
+      for (let dz = -r; dz <= r; dz++) {
+        const d = Math.sqrt(dx * dx + dz * dz)
+        if (d > rNow + HALF) continue
+        if (hollow && d <= rNext + HALF && d <= rNow - 1 + HALF) continue
+        // A conical roof climbs toward its own axis.
+        layer.push({ pos: new Vec3(dx + r, y + level, dz + r), name: orientStairs(material, -dx, -dz) })
+      }
+    }
+    blocks.push(...outsideIn(layer, r * 2 + 1, r * 2 + 1))
+  }
+
+  return blocks
+}
+
+// A rectangular pyramid, insetting proportionally so any height works - a tall
+// thin spire and a squat ziggurat come out of the same generator. Hollow keeps
+// each level's perimeter, which is what you want for a stepped temple.
+function pyramid ({ width, depth, height, material, hollow = false, y = 0 }) {
+  const w = Math.max(1, Math.floor(width))
+  const d = Math.max(1, Math.floor(depth))
+  const h = Math.max(1, Math.floor(height))
+  const blocks = []
+
+  for (let level = 0; level < h; level++) {
+    const t = level / h
+    const insetX = Math.floor(t * (w - 1) / 2)
+    const insetZ = Math.floor(t * (d - 1) / 2)
+    const x0 = insetX
+    const x1 = w - 1 - insetX
+    const z0 = insetZ
+    const z1 = d - 1 - insetZ
+    if (x0 > x1 || z0 > z1) break
+
+    const layer = []
+    for (let x = x0; x <= x1; x++) {
+      for (let z = z0; z <= z1; z++) {
+        const isPerimeter = x === x0 || x === x1 || z === z0 || z === z1
+        if (hollow && !isPerimeter && level < h - 1) continue
+        // A pyramid used as a hip roof: all four faces climb inward.
+        const name = orientStairs(material, (w - 1) / 2 - x, (d - 1) / 2 - z)
+        layer.push({ pos: new Vec3(x, y + level, z), name })
+      }
+    }
+    blocks.push(...outsideIn(layer, w, d))
+  }
+
+  return blocks
+}
+
+// A pitched (gable) roof: two sloping planes meeting at a ridge. `axis` is the
+// direction the ridge runs. This is the difference between a house and a box
+// with a lid, and it costs one primitive.
+function gable ({ width, depth, material, axis = 'x', y = 0 }) {
+  const w = Math.max(1, Math.floor(width))
+  const d = Math.max(1, Math.floor(depth))
+  const run = axis === 'z' ? d : w // along the ridge
+  const span = axis === 'z' ? w : d // across the slope
+  const blocks = []
+
+  for (let level = 0; level * 2 < span; level++) {
+    const near = level
+    const far = span - 1 - level
+    for (const across of far === near ? [near] : [near, far]) {
+      // Each slope climbs toward the ridge, so the two sides face opposite ways.
+      const toward = across === near ? 1 : -1
+      const name = axis === 'z'
+        ? orientStairs(material, toward, 0)
+        : orientStairs(material, 0, toward)
+      for (let along = 0; along < run; along++) {
+        const pos = axis === 'z'
+          ? new Vec3(across, y + level, along)
+          : new Vec3(along, y + level, across)
+        blocks.push({ pos, name })
+      }
+    }
+  }
+
+  return blocks
+}
+
+// The OPENING under an arch - a rectangle topped by a semicircle, extruded
+// `depth` blocks along `axis`.
+//
+// Its best use is carving: pass material 'air' and it cuts an arched doorway,
+// window or tunnel straight through a wall you already built. Passing a solid
+// block instead casts the same volume in stone, which is occasionally what you
+// want for a freestanding arch.
+function arch ({ width, height, depth = 1, material, axis = 'x', y = 0 }) {
+  const w = Math.max(1, Math.floor(width))
+  const h = Math.max(1, Math.floor(height))
+  const thickness = Math.max(1, Math.floor(depth))
+  const r = Math.floor((w - 1) / 2)
+  const centre = r
+  const straight = Math.max(0, h - r - 1)
+  const blocks = []
+
+  for (let level = 0; level < h; level++) {
+    let half
+    if (level < straight) {
+      half = r
+    } else {
+      const dy = level - straight
+      const inner = r * r - dy * dy
+      if (inner < 0) continue
+      half = Math.floor(Math.sqrt(inner))
+    }
+    for (let across = centre - half; across <= centre + half; across++) {
+      for (let along = 0; along < thickness; along++) {
+        const pos = axis === 'z'
+          ? new Vec3(across, y + level, along)
+          : new Vec3(along, y + level, across)
+        blocks.push({ pos, name: material })
+      }
+    }
+  }
+
+  return blocks
+}
+
+// The ordered ring of cells at radius r, going anticlockwise. Consecutive
+// entries are neighbours (orthogonally or diagonally), which is what makes it
+// usable as a path rather than just a set.
+function ringCells (r) {
+  const limit = circleLimit(r)
+  const inside = (a, b) => (a * a + b * b) <= limit
+  const cells = []
+  for (let dx = -r; dx <= r; dx++) {
+    for (let dz = -r; dz <= r; dz++) {
+      if (!inside(dx, dz)) continue
+      if (inside(dx + 1, dz) && inside(dx - 1, dz) && inside(dx, dz + 1) && inside(dx, dz - 1)) continue
+      cells.push({ dx, dz, angle: Math.atan2(dz, dx) })
+    }
+  }
+  return cells.sort((a, b) => a.angle - b.angle)
+}
+
+// The ring walked as a PATH: a closed loop of single cells where every step
+// changes exactly one coordinate by one.
+//
+// A rasterised circle's perimeter contains diagonal steps, and a diagonal step
+// up cannot be walked in Minecraft without jumping, so each diagonal is split
+// by a bridging cell. There are always two candidates and they always differ,
+// which is what makes the repair below possible.
+//
+// THE LOOP IS CYCLIC, SO THE REPAIR HAS TO BE. Choosing each bridge greedily
+// against the cells already placed leaves exactly one bad seam per loop - the
+// wrap-around, where the first bridge is chosen before there is any preceding
+// context to compare against. At a cardinal extreme of the circle the diagonal
+// entering and the diagonal leaving both want the same inner bridge, walking
+// A -> B -> A: two levels later the staircase is directly above itself and a
+// climber hits their head. So bridges are placed by preference first, then
+// repaired against the closed loop, where index -2 and +2 both exist.
+function ringPath (r) {
+  const ring = ringCells(r)
+  const n = ring.length
+  const path = []
+
+  for (let i = 0; i < n; i++) {
+    const cur = ring[i]
+    const prev = ring[(i - 1 + n) % n]
+    const dx = cur.dx - prev.dx
+    const dz = cur.dz - prev.dz
+
+    if (dx !== 0 && dz !== 0) {
+      const rad = c => c.dx * c.dx + c.dz * c.dz
+      // Prefer the inner candidate so a tread never pushes into the tower wall;
+      // keep the outer one as the escape route for the repair pass.
+      const [near, far] = [{ dx: cur.dx, dz: prev.dz }, { dx: prev.dx, dz: cur.dz }]
+        .sort((a, b) => rad(a) - rad(b))
+      path.push({ ...near, alt: far })
+    }
+    path.push({ dx: cur.dx, dz: cur.dz })
+  }
+
+  const len = path.length
+  const same = (a, b) => Boolean(a) && Boolean(b) && a.dx === b.dx && a.dz === b.dz
+  const at = i => path[(i % len + len) % len]
+
+  for (let pass = 0; pass < 2; pass++) {
+    for (let i = 0; i < len; i++) {
+      const node = path[i]
+      if (!node.alt) continue // a ring cell is fixed; only bridges can move
+      if (!same(node, at(i - 2)) && !same(node, at(i + 2))) continue
+
+      // Both candidates are orthogonally adjacent to both neighbours, so
+      // swapping never breaks the walk - it only has to not create a new clash.
+      const swapped = { dx: node.alt.dx, dz: node.alt.dz, alt: { dx: node.dx, dz: node.dz } }
+      const clashes = [at(i - 2), at(i - 1), at(i + 1), at(i + 2)].some(c => same(swapped, c))
+      if (!clashes) path[i] = swapped
+    }
+  }
+
+  return path.map(({ dx, dz }) => ({ dx, dz }))
+}
+
+// A helical staircase winding up the inside of a tower: ONE cell per level,
+// one orthogonal step and one block of rise between consecutive treads.
+//
+// Two rewrites got here. The first sampled an angle per level and emitted a
+// radial run - at radius 3 that advances 18.9 degrees per level, so rounding
+// put consecutive treads on THE SAME CELLS: stairs stacked on top of each
+// other, no headroom, unclimbable. The second walked the ring but kept L-shaped
+// treads, which fixed the geometry and left the orientation incoherent, because
+// the block you actually step up onto is the bridging cell, not the ring cell.
+//
+// Walking a path of single cells makes all of it fall out: every tread is a
+// distinct cell, the cell above any tread is a different path position (so
+// headroom is free), every step is orthogonal, and each tread has exactly one
+// arrival direction to face.
+//
+// facing is the direction of ASCENT - the raised half is on the facing side.
+// Measured, not assumed; see test/stair-facing-probe.js.
+function spiral ({ radius, height, material, clearance = true, y = 0 }) {
+  const r = Math.max(1, Math.floor(radius))
+  const h = Math.max(1, Math.floor(height))
+  const path = ringPath(r)
+  const n = path.length
+  const orientable = /_stairs$/.test(baseName(material)) && !hasState(material)
+  const treads = []
+  const clear = []
+
+  for (let level = 0; level < h; level++) {
+    const cell = path[level % n]
+    const prev = path[(level % n - 1 + n) % n]
+
+    let name = material
+    if (orientable) {
+      const dx = cell.dx - prev.dx
+      const dz = cell.dz - prev.dz
+      const facing = dx !== 0 ? (dx > 0 ? 'east' : 'west') : (dz > 0 ? 'south' : 'north')
+      name = withState(material, `facing=${facing},half=bottom`)
+    }
+
+    treads.push({ pos: new Vec3(cell.dx + r, y + level, cell.dz + r), name })
+
+    // A staircase owns the two blocks above every tread. Without this the
+    // stairs are perfect and the tower is still unclimbable: a plan that lays a
+    // solid floor disc across the shaft leaves that floor sitting directly on
+    // top of the treads, so a climber's feet are inside it and the ascent stops
+    // dead at every storey. The stairs cannot know where the floors will be, so
+    // they carve their own passage and punch a person-sized hole through
+    // whatever they pass through - which is also how the climb gets OUT onto an
+    // upper floor instead of dead-ending under it.
+    //
+    // Safe because of the invariants above: no tread sits directly on another,
+    // and none sits two levels under another, so this air never lands on a
+    // tread. Treads are emitted after the clearance regardless, so they win.
+    if (clearance) {
+      clear.push({ pos: new Vec3(cell.dx + r, y + level + 1, cell.dz + r), name: 'air' })
+      clear.push({ pos: new Vec3(cell.dx + r, y + level + 2, cell.dz + r), name: 'air' })
+    }
+  }
+
+  return clear.concat(treads)
+}
+
+
+// ---------------------------------------------------------------------------
+// A straight flight of stairs that looks built.
+//
+// The recipe, from three reference builds: treads facing the direction of
+// ascent; a solid mass under every tread so nothing floats; a stringer up each
+// open side, one block PROUD of the tread beside it; taller posts at both ends
+// carrying the lights; landings every few steps on a long flight.
+//
+// The failure this replaces was a bare helix of full blocks hanging in the air
+// with no mass under it, no stringer and no lights - every line of the recipe
+// missed at once, because the model was placing individual cells by hand.
+//
+// LANDINGS SIT FLUSH WITH THE TREAD THEY FOLLOW, not one above it. A tread is a
+// stair block whose walkable top is one above its own level, so a landing at
+// the same level meets it exactly; putting the landing a level higher would add
+// a block of climb per landing, and then `rise` would no longer be the height
+// the flight gains. The prompt promises `rise` is exactly the floor-to-floor
+// difference, so the geometry has to keep that true.
+// ---------------------------------------------------------------------------
+const STAIR_HEADROOM = 3
+
+function persistentLeaves (name) {
+  return /_leaves$/.test(baseName(name)) && !hasState(name)
+    ? withState(name, 'persistent=true')
+    : name
+}
+
+function stairs ({
+  axis = 'x', ascent = '+', width = 3, rise = 9,
+  tread, fill, stringer = null, sides = 'both',
+  postHeight = 3, lights = 'torch', lightEvery = 4,
+  landingEvery = 0, turn = 'none', flare = 0,
+  stringerPattern = null, y = 0
+}) {
+  const w = Math.max(1, Math.floor(width))
+  const steps = Math.max(2, Math.floor(rise))
+  const flareBy = Math.max(0, Math.min(2, Math.floor(flare)))
+  const fillName = fill || tread
+  const clear = []
+  const solid = []
+
+  // Work in a local frame so a turn is a change of basis rather than four
+  // copies of the same loop.
+  let run = axis === 'z' ? new Vec3(0, 0, 1) : new Vec3(1, 0, 0)
+  if (ascent === '-') run = run.scaled(-1)
+  let across = axis === 'z' ? new Vec3(1, 0, 0) : new Vec3(0, 0, 1)
+  let base = new Vec3(0, 0, 0)
+
+  const put = (cell, level, name) => solid.push({ pos: new Vec3(cell.x, y + level, cell.z), name })
+  const open = (cell, level) => {
+    for (let h = 1; h <= STAIR_HEADROOM; h++) {
+      clear.push({ pos: new Vec3(cell.x, y + level + h, cell.z), name: 'air' })
+    }
+  }
+  const column = (cell, level, name) => {
+    for (let below = 0; below < level; below++) put(cell, below, name)
+  }
+  const lightName = lights === 'lantern' ? 'lantern[hanging=false]' : (lights === 'none' ? null : 'torch')
+
+  let step = 0
+  let inFlight = 0
+
+  while (step < steps) {
+    const level = step
+    const treadName = withState(tread, `facing=${ascentFacing(run.x, run.z)},half=bottom`)
+    const spread = step < flareBy ? 1 : 0
+    const lo = -spread
+    const hi = w - 1 + spread
+    const rail = stringerPattern && stringerPattern.length
+      ? stringerPattern[step % stringerPattern.length]
+      : stringer
+
+    for (let a = lo; a <= hi; a++) {
+      const cell = base.plus(run.scaled(inFlight)).plus(across.scaled(a))
+      open(cell, level)
+      put(cell, level, treadName)
+      column(cell, level, fillName)
+    }
+
+    if (rail) {
+      const railName = /_stairs$/.test(baseName(rail)) && !hasState(rail)
+        ? withState(rail, `facing=${ascentFacing(run.x, run.z)},half=bottom`)
+        : persistentLeaves(rail)
+      const wanted = sides === 'none' ? [] : sides === 'left' ? [lo - 1] : sides === 'right' ? [hi + 1] : [lo - 1, hi + 1]
+
+      for (const a of wanted) {
+        const cell = base.plus(run.scaled(inFlight)).plus(across.scaled(a))
+        put(cell, level, railName)
+        put(cell, level + 1, railName) // always one above the tread beside it
+        column(cell, level, railName)
+
+        const isEnd = step === 0 || step === steps - 1
+        if (isEnd && postHeight > 1) {
+          for (let h = 2; h <= postHeight; h++) put(cell, level + h, railName)
+          if (lightName) put(cell, level + postHeight + 1, lightName)
+        } else if (lightName && lightEvery > 0 && step > 0 && step % lightEvery === 0) {
+          put(cell, level + 2, lightName)
+        }
+      }
+    }
+
+    step++
+    inFlight++
+
+    if (landingEvery > 0 && step % landingEvery === 0 && step < steps) {
+      const landingLevel = step - 1 // flush with the tread just climbed
+      for (let r = 0; r < w; r++) {
+        for (let a = 0; a < w; a++) {
+          const cell = base.plus(run.scaled(inFlight + r)).plus(across.scaled(a))
+          open(cell, landingLevel)
+          put(cell, landingLevel, fillName)
+          column(cell, landingLevel, fillName)
+        }
+      }
+
+      // Re-base the frame past the landing; a turn swaps the axes.
+      if (turn === 'right') {
+        const nextBase = base.plus(run.scaled(inFlight + w - 1)).plus(across.scaled(w))
+        const nextRun = across
+        across = run.scaled(-1)
+        run = nextRun
+        base = nextBase
+      } else if (turn === 'left') {
+        const nextBase = base.plus(run.scaled(inFlight)).plus(across.scaled(-1))
+        const nextRun = across.scaled(-1)
+        across = run
+        run = nextRun
+        base = nextBase
+      } else {
+        base = base.plus(run.scaled(inFlight + w))
+      }
+      inFlight = 0
+    }
+  }
+
+  // Clearance first so the treads and rails win wherever they meet it.
+  return clear.concat(solid)
+}
+
+module.exports = { floor, wall, box, sphere, house, cylinder, cone, pyramid, gable, arch, spiral, stairs, outsideIn, circleLimit, ascentFacing }
