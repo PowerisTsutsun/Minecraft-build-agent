@@ -169,5 +169,87 @@ check('surfaces: the room interior is not mistaken for a window',
 check('decorator: the overhung build gets framed windows',
   (overhung.decor || {}).window_frames > 0, JSON.stringify(overhung.decor))
 
+
+
+// --- the rest of the universal habits --------------------------------------
+const mcData = require('minecraft-data')('26.1')
+const realBlock = n => Boolean(mcData.blocksByName[n.split('[')[0]])
+const castle = (() => {
+  const v = validatePlan({
+    summary: 'castle',
+    palette: { name: 'medieval_stone' },
+    decor: { style: 'medieval_stone', intensity: 0.7 },
+    shell: [
+      { op: 'curtain_wall', offset: { x: 0, y: 0, z: 0 }, from: { x: 0, z: 0 }, to: { x: 40, z: 0 }, height: 10 },
+      { op: 'tower', offset: { x: 0, y: 0, z: 0 }, diameter: 9, height: 20, storeys: 3, top: 'battlements' },
+      { op: 'hall', offset: { x: 14, y: 0, z: 10 }, width: 13, depth: 19, storeys: 2 }
+    ]
+  }, realBlock)
+  return renderPlan(v, primitives, { isKnownBlock: realBlock })
+})()
+const habits = castle.decor || {}
+
+check('castle: renders without errors', castle.errors.length === 0, castle.errors[0])
+check('castle: every id is a real block',
+  castle.blocks.every(b => realBlock(b.name)),
+  [...new Set(castle.blocks.map(b => b.name).filter(n => !realBlock(n)))].slice(0, 3).join(' '))
+
+check('quoins: corners are picked out in trim', habits.quoins > 0, `${habits.quoins}`)
+
+// The number that matters. Per-column grouping produced 1296 slits on this
+// exact castle - every column of the curtain wall counted as its own blank
+// wall. A run is a horizontal stretch, and slits are spaced along it.
+check('arrow_slits: spaced along the wall, not one per column',
+  habits.arrow_slits > 0 && habits.arrow_slits < 150, `${habits.arrow_slits} slits`)
+check('arrow_slits: stay a small fraction of the build',
+  habits.arrow_slits < castle.blocks.length * 0.05,
+  `${habits.arrow_slits} of ${castle.blocks.length}`)
+
+check('lights: something glows on the build', habits.lights > 0, `${habits.lights}`)
+// Only the decorator's own lanterns hang - the ones a stairs op puts on its
+// posts correctly stand, so checking every lantern on the build is wrong.
+check('lights: no lantern is left in the default state',
+  castle.blocks.filter(b => /lantern/.test(b.name)).every(b => /hanging=(true|false)/.test(b.name)),
+  castle.blocks.filter(b => /lantern/.test(b.name) && !/hanging=/.test(b.name)).slice(0, 2).map(b => b.name).join(' '))
+check('lights: the decorator hangs its lanterns from what is above them',
+  castle.blocks.some(b => /lantern\[hanging=true/.test(b.name)))
+check('lights: every light has something to attach to',
+  castle.blocks.filter(b => /wall_torch/.test(b.name)).every(b => /facing=/.test(b.name)))
+
+check('material_gradient: the wall changes with height', habits.material_gradient > 0)
+const wallCells = castle.blocks.filter(b => b.name === 'stone_bricks')
+const roughCells = castle.blocks.filter(b => b.name === 'cobblestone')
+check('material_gradient: rough stone concentrated near the ground',
+  roughCells.length === 0 ||
+  roughCells.filter(b => b.pos.y < 6).length > roughCells.filter(b => b.pos.y > 14).length,
+  `${roughCells.filter(b => b.pos.y < 6).length} low vs ${roughCells.filter(b => b.pos.y > 14).length} high`)
+
+// A short building has no room for a gradient and should not get one.
+const cottage = (() => {
+  const v = validatePlan({
+    summary: 'cottage',
+    palette: { name: 'medieval_stone' },
+    decor: { style: 'medieval_stone' },
+    shell: [{ op: 'box', material: 'wall', offset: { x: 0, y: 0, z: 0 }, anchor: 'corner', width: 7, depth: 7, height: 5, hollow: true }]
+  }, realBlock)
+  return renderPlan(v, primitives, { isKnownBlock: realBlock })
+})()
+check('material_gradient: skipped on a building too short to show one',
+  !(cottage.decor || {}).material_gradient, `${(cottage.decor || {}).material_gradient}`)
+
+// Every habit can be turned off.
+const bare = (() => {
+  const v = validatePlan({
+    summary: 'bare',
+    palette: { name: 'medieval_stone' },
+    decor: { style: 'medieval_stone', skip: ['quoins', 'arrow_slits', 'lights', 'material_gradient'] },
+    shell: [{ op: 'tower', offset: { x: 0, y: 0, z: 0 }, diameter: 9, height: 20, storeys: 3, top: 'battlements' }]
+  }, realBlock)
+  return renderPlan(v, primitives, { isKnownBlock: realBlock })
+})()
+check('decor.skip: turns off each named habit',
+  !(bare.decor || {}).quoins && !(bare.decor || {}).arrow_slits && !(bare.decor || {}).lights,
+  JSON.stringify(bare.decor))
+
 console.log(failures ? `\n${failures} FAILURES` : '\nall passed')
 process.exit(failures ? 1 : 0)

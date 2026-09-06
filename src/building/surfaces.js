@@ -142,8 +142,77 @@ function analyse (cells, carved) {
       normals.some(n => n.v.x !== 0) && normals.some(n => n.v.z !== 0))
     .map(([k, normals]) => ({ pos: solid.get(k).pos, normals }))
 
-  // A blank wall: an exterior face with no opening anywhere in its column.
+  // A blank wall: a run of exterior faces on one plane, tall and unbroken by any
+  // opening. This is what arrow slits and pilasters are looking for - a stretch
+  // of undifferentiated masonry is the single most generated-looking thing a
+  // build can have.
+  const openingCells = new Set()
+  for (const k of carved.keys()) openingCells.add(k)
+
+  const columns = new Map() // "normal|plane|across" -> [heights]
+  for (const face of exteriorFaces) {
+    const n = face.normal
+    const plane = n.v.x !== 0 ? face.pos.x : face.pos.z
+    const across = n.v.x !== 0 ? face.pos.z : face.pos.x
+    const id = `${n.key}|${plane}|${across}`
+    if (!columns.has(id)) columns.set(id, [])
+    columns.get(id).push(face)
+  }
+
+  // A RUN IS A STRETCH OF WALL, NOT A SINGLE COLUMN.
+  //
+  // Grouping per column looked right and produced 1296 arrow slits on one
+  // castle - every column of a 40-block curtain wall counted as its own blank
+  // wall and got its own pair. What the habit actually wants is the contiguous
+  // horizontal stretch, so a slit can be spaced along it.
+  const MIN_BLANK = 8
+  const blankColumns = []
+  for (const [id, faces] of columns) {
+    const [normalKey, plane, across] = id.split('|')
+    const ys = faces.map(f => f.pos.y).sort((a, b) => a - b)
+    const dir = DIRS.find(d => d.key === normalKey)
+    const hasOpening = faces.some(f => {
+      const out = f.pos.plus(dir.v)
+      return openingCells.has(key(out.x, out.y, out.z))
+    })
+    if (hasOpening) continue
+    if (ys.length < MIN_BLANK) continue
+    if (ys[ys.length - 1] - ys[0] + 1 !== ys.length) continue // contiguous
+    blankColumns.push({ dir, plane: Number(plane), across: Number(across), bottom: ys[0], top: ys[ys.length - 1], height: ys.length, faces })
+  }
+
+  blankColumns.sort((a, b) =>
+    a.dir.key.localeCompare(b.dir.key) || a.plane - b.plane || a.across - b.across)
+
   const verticalRuns = []
+  let current = null
+  for (const col of blankColumns) {
+    const continues = current &&
+      current.normal.key === col.dir.key &&
+      current.plane === col.plane &&
+      col.across === current.lastAcross + 1 &&
+      col.bottom === current.bottom &&
+      col.top === current.top
+    if (continues) {
+      current.columns.push(col)
+      current.lastAcross = col.across
+      current.length++
+    } else {
+      if (current) verticalRuns.push(current)
+      current = {
+        normal: col.dir,
+        plane: col.plane,
+        firstAcross: col.across,
+        lastAcross: col.across,
+        bottom: col.bottom,
+        top: col.top,
+        height: col.height,
+        length: 1,
+        columns: [col]
+      }
+    }
+  }
+  if (current) verticalRuns.push(current)
 
   return {
     solid,

@@ -39,7 +39,12 @@ function paletteFor (decor, isKnownBlock) {
   return {
     trim,
     stairs: familyVariant(trim, 'stairs', isKnownBlock),
-    slab: familyVariant(trim, 'slab', isKnownBlock)
+    slab: familyVariant(trim, 'slab', isKnownBlock),
+    // Filled in from the plan's palette when there is one, so the gradient
+    // habit uses the same blocks the build is already made of.
+    wallBase: decor.wallBase || null,
+    baseRough: decor.baseRough || null,
+    upper: decor.upper || null
   }
 }
 
@@ -65,6 +70,18 @@ function decorate (cells, carved, decor, isKnownBlock) {
   }
   if (!skip.has('window_frames')) {
     applied.window_frames = windowFrames(view, palette, emit, occupied)
+  }
+  if (!skip.has('quoins')) {
+    applied.quoins = quoins(view, palette, emit, occupied)
+  }
+  if (!skip.has('arrow_slits')) {
+    applied.arrow_slits = arrowSlits(view, palette, emit, occupied, decor)
+  }
+  if (!skip.has('lights')) {
+    applied.lights = lightsUnderOverhangs(view, palette, emit, occupied, decor)
+  }
+  if (!skip.has('material_gradient') && decor.gradient !== false) {
+    applied.material_gradient = materialGradient(view, palette, emit, occupied, decor)
   }
 
   return { blocks: out, applied, surfaces: view }
@@ -196,5 +213,136 @@ function windowFrames (view, palette, emit, occupied) {
   }
   return n
 }
+
+
+// Corner stones: alternating courses of trim picking out every corner. On a
+// round tower there are no corners, so the same instinct becomes ribs - a
+// vertical line of trim at the four cardinal points, which is what stops a
+// cylinder reading as a pipe.
+function quoins (view, palette, emit, occupied) {
+  let n = 0
+  const byColumn = new Map()
+  for (const corner of view.corners) {
+    const k = `${corner.pos.x},${corner.pos.z}`
+    if (!byColumn.has(k)) byColumn.set(k, [])
+    byColumn.get(k).push(corner)
+  }
+
+  for (const [, cells] of byColumn) {
+    const ys = cells.map(c => c.pos.y).sort((a, b) => a - b)
+    if (ys.length < 3) continue // not a corner of anything, just a stray cell
+    for (const cell of cells) {
+      // Alternate pairs of courses so the quoin reads as stonework, not stripes.
+      if (Math.floor((cell.pos.y - ys[0]) / 2) % 2 !== 0) continue
+      emit(cell.pos, palette.trim)
+      n++
+    }
+  }
+  return n
+}
+
+// A tall blank wall gets slits at a third and two thirds of its height. This is
+// the habit that fixes the "undifferentiated masonry" look on curtain walls and
+// tower shafts, where there is nothing else to break the surface up.
+function arrowSlits (view, palette, emit, occupied, decor) {
+  const intensity = Number.isFinite(decor.intensity) ? decor.intensity : 0.7
+  let n = 0
+  const done = new Set()
+
+  // Spacing along the run, not one per column. Closer together as intensity
+  // rises, but never so close that the wall becomes a colonnade.
+  const spacing = Math.max(5, Math.round(11 - 5 * intensity))
+
+  for (const run of view.verticalRuns) {
+    if (run.height < 8 || run.length < 3) continue
+    const fractions = run.height >= 14 ? [1 / 3, 2 / 3] : [0.5]
+
+    for (let i = Math.floor(spacing / 2); i < run.length; i += spacing) {
+      const col = run.columns[i]
+      if (!col) continue
+      for (const f of fractions) {
+        const y = run.bottom + Math.floor(run.height * f)
+        const id = `${run.normal.key}|${run.plane}|${col.across}|${y}`
+        if (done.has(id)) continue
+        done.add(id)
+
+        for (let h = 0; h < 2; h++) {
+          const face = col.faces.find(c => c.pos.y === y + h)
+          if (!face) continue
+          emit(face.pos, 'air')
+          n++
+        }
+        const below = col.faces.find(c => c.pos.y === y - 1)
+        const above = col.faces.find(c => c.pos.y === y + 2)
+        if (below) { emit(below.pos, palette.trim); n++ }
+        if (above) { emit(above.pos, palette.trim); n++ }
+      }
+    }
+  }
+  return n
+}
+
+// Lanterns on chains under anything that overhangs, and beside every doorway.
+// Something has to glow from each face or the build disappears at night.
+function lightsUnderOverhangs (view, palette, emit, occupied, decor) {
+  const intensity = Number.isFinite(decor.intensity) ? decor.intensity : 0.7
+  const spacing = Math.max(4, Math.round(7 - 3 * intensity))
+  let n = 0
+
+  for (const over of view.overhangs) {
+    // Space them out along the run, and only where there is air to hang into.
+    if ((over.pos.x + over.pos.z) % spacing !== 0) continue
+    const under = over.pos.offset(0, -1, 0)
+    if (occupied(under)) continue
+    if (!view.isOutside(under)) continue
+    emit(under, 'lantern[hanging=true]')
+    n++
+  }
+
+  // A pair beside each doorway - the one light every building needs.
+  for (const hole of view.openings) {
+    if (hole.min.y > view.minY + 2) continue // doorways only, not windows
+    const thin = hole.axis
+    for (const side of [-1, 1]) {
+      const pos = new Vec3(
+        thin === 'x' ? hole.min.x : hole.min.x + (side < 0 ? -1 : hole.max.x - hole.min.x + 1),
+        hole.min.y + 1,
+        thin === 'x' ? hole.min.z + (side < 0 ? -1 : hole.max.z - hole.min.z + 1) : hole.min.z)
+      if (occupied(pos)) continue
+      if (!view.isOutside(pos)) continue
+      // A torch needs a solid beside it; the orientation pass works out which.
+      const supported = [[1, 0], [-1, 0], [0, 1], [0, -1]]
+        .some(([dx, dz]) => view.isSolid(pos.offset(dx, 0, dz)))
+      if (!supported) continue
+      emit(pos, 'wall_torch')
+      n++
+    }
+  }
+  return n
+}
+
+// Wall material changes with height: rough at the bottom where it meets the
+// ground, the main block through the body, something lighter at the top.
+function materialGradient (view, palette, emit, occupied, decor) {
+  const rough = palette.baseRough
+  const upper = palette.upper
+  if (!rough && !upper) return 0
+
+  const span = Math.max(1, view.maxY - view.minY)
+  if (span < 8) return 0 // too short for a gradient to read as anything
+  let n = 0
+
+  for (const face of view.exteriorFaces) {
+    const f = (face.pos.y - view.minY) / span
+    const want = f < 0.2 ? rough : (f > 0.75 ? upper : null)
+    if (!want) continue
+    const cell = view.cells.get(`${face.pos.x},${face.pos.y},${face.pos.z}`)
+    if (!cell || cell.name !== palette.wallBase) continue
+    emit(face.pos, want)
+    n++
+  }
+  return n
+}
+
 
 module.exports = { decorate, paletteFor, STYLES }

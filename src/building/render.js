@@ -251,7 +251,19 @@ function renderPlan (plan, primitives, opts = {}) {
 
   let decorated = { blocks: [], applied: {} }
   if (plan.decor && plan.decor.style !== 'plain') {
-    decorated = decorate(cells, carvedBy, plan.decor, isKnownBlock)
+    // Hand the decorator the palette the build is actually made of, so the
+    // gradient habit swaps between blocks already in use rather than
+    // introducing a fourth stone from nowhere.
+    const table = plan.palette ? plan.palette.table : null
+    const wall = table && table.wall
+    const decorWithPalette = {
+      ...plan.decor,
+      wallBase: wall ? (typeof wall === 'string' ? wall : wall.base) : null,
+      baseRough: table && typeof table.base_rough === 'string' ? table.base_rough : null,
+      upper: table && typeof table.upper === 'string' ? table.upper : null,
+      trim: plan.decor.trim || (table && typeof table.trim === 'string' ? table.trim : null)
+    }
+    decorated = decorate(cells, carvedBy, decorWithPalette, isKnownBlock)
     if (decorated.note) warnings.push(`decorator: ${decorated.note}`)
   }
   const decorAction = { op: '__decor', phase: 'decor', material: plan.decor ? plan.decor.style : 'none' }
