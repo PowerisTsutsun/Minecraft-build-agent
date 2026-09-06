@@ -6,7 +6,7 @@
   "private": true,
   "scripts": {
     "start": "node index.js",
-    "test": "node test/primitives.test.js && node test/boxes.test.js && node test/shapes.test.js && node test/render.test.js && node test/stairs.test.js && node test/decorate.test.js && node test/openings.test.js && node test/architecture.test.js && node test/macros.test.js && node test/palette.test.js && node test/views.test.js && node test/pipeline.test.js"
+    "test": "node test/primitives.test.js && node test/boxes.test.js && node test/shapes.test.js && node test/render.test.js && node test/stairs.test.js && node test/decorate.test.js && node test/openings.test.js && node test/architecture.test.js && node test/macros.test.js && node test/palette.test.js && node test/views.test.js && node test/pipeline.test.js && node test/inspector.test.js"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.124.0",

@@ -10,6 +10,7 @@ const llm = require('./llm')
 const style = require('./style')
 const plans = require('../plans')
 const pipeline = require('../pipeline')
+const inspector = require('../pipeline/inspector')
 const { configureMovements, isKnownBlock } = require('../bot')
 const commander = require('../building/commander')
 const { SCAFFOLD_BLOCK, MAX_SIZE, MAX_BLOCKS, DEFAULTS, BUILD_MODE } = require('../config')
@@ -390,7 +391,7 @@ async function make (bot, request, requester) {
   state.lastRequest = request
   say(bot, `Plan: ${plan.summary}`)
   console.log('[!make] validated plan:', JSON.stringify(plan.actions, null, 2))
-  await runBuild(bot, blocks, `make: ${request}`.slice(0, 80), requester)
+  await runBuild(bot, blocks, `make: ${request}`.slice(0, 80), requester, run)
 }
 
 // ---------------------------------------------------------------------------
@@ -432,7 +433,7 @@ function forget (bot, name) {
 // ---------------------------------------------------------------------------
 // Shared build runner: origin, material check, dry-run, execution, reporting.
 // ---------------------------------------------------------------------------
-async function runBuild (bot, blocks, label, requester) {
+async function runBuild (bot, blocks, label, requester, buildRun) {
   if (state.building) return say(bot, 'Already building - say !stop first.')
   if (blocks.length > MAX_BLOCKS) {
     return say(bot, `That's ${blocks.length} blocks, over the ${MAX_BLOCKS} cap.`)
@@ -539,6 +540,39 @@ async function runBuild (bot, blocks, label, requester) {
       }
       // Movements were switched to canDig:false for the sweep - put them back.
       configureMovements(bot, materials)
+    }
+
+    // Inspect what actually landed. Everything upstream reasons about a cell
+    // map; this is the only step that asks the server, and the gap between the
+    // two is where silent failures live - fills into unloaded chunks, blocks
+    // the server deleted for want of support, fluids that flowed away.
+    if (stats.mode === 'command' && !state.cancelled && stats.placed) {
+      try {
+        const worldBlocks = blocks.map(b => ({ pos: origin.plus(b.pos), name: b.name }))
+        let report = await inspector.inspect(bot, origin, worldBlocks)
+
+        if (!report.pass && report.detail.length) {
+          const fix = await inspector.repair(bot, report, worldBlocks, commander)
+          if (fix.fixed) {
+            say(bot, `Fixed ${fix.fixed} block${fix.fixed === 1 ? '' : 's'} that had not landed.`)
+            report = await inspector.inspect(bot, origin, worldBlocks)
+          }
+        }
+
+        console.log('[inspect]', inspector.summarise(report))
+        if (buildRun) buildRun.note('inspection.json', JSON.stringify(report, null, 2) + '\n')
+
+        if (!report.pass) {
+          const issues = []
+          if (report.missing) issues.push(`${report.missing} blocks missing`)
+          if (report.wrong) issues.push(`${report.wrong} wrong`)
+          if (!report.openings) issues.push('no way in at ground level')
+          if (report.stairs.blocked) issues.push(`${report.stairs.blocked} stair treads blocked`)
+          if (issues.length) say(bot, `Inspection: ${issues.join(', ')}.`)
+        }
+      } catch (err) {
+        console.error('[inspect] skipped:', err.message)
+      }
     }
 
     // Only an interrupted build should resume at the same spot next time. A
