@@ -69,4 +69,20 @@ function familyVariant (material, suffix, isKnownBlock) {
   return guesses.find(g => isKnownBlock(g)) || null
 }
 
-module.exports = { parse, baseName, hasState, isValidSpec, withState, familyVariant }
+// A prismarine-block as a spec string, STATE INCLUDED.
+//
+// block.name is just the id. A schematic placed from names alone lands every
+// bed as a default unpaired foot and every trapdoor flat on the floor - a
+// verbatim copy of a working iron farm, placed that way, had villagers with no
+// home, a zombie walking free, and made no iron. The state is right there in
+// getProperties(); it just has to be carried.
+function specOf (block) {
+  if (!block) return null
+  let props = {}
+  try { props = block.getProperties() || {} } catch (err) { props = {} }
+  const keys = Object.keys(props).sort()
+  if (!keys.length) return block.name
+  return `${block.name}[${keys.map(k => `${k}=${String(props[k])}`).join(',')}]`
+}
+
+module.exports = { parse, baseName, hasState, isValidSpec, withState, familyVariant, specOf }

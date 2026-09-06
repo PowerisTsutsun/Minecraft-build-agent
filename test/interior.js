@@ -2,6 +2,9 @@ const m=require('mineflayer'),{Vec3}=require('vec3')
 const OX=parseInt(process.env.IX,10), OZ=parseInt(process.env.IZ,10)
 const b=m.createBot({host:'127.0.0.1',port:25566,username:'Scanner',version:'26.1'})
 b.once('spawn',async()=>{
+  // Normal difficulty means mobs fight back; a scanner that dies mid-read
+  // returns half a world. Spectator is immune and still reads blocks.
+  b.chat('/gamemode spectator')
   await b.waitForTicks(100); await b.waitForChunksToLoad().catch(()=>{}); await b.waitForTicks(80)
   // Find the interior: cells with air at head height enclosed by solid.
   const solid=p=>{const q=b.blockAt(p);return q&&q.boundingBox==='block'}

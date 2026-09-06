@@ -1,14 +1,18 @@
-# Slash commands run after the template is placed, one per line.
+# Entities for the iron farm. Blocks alone make no iron: the machine is three
+# villagers who can see a zombie they cannot reach, each with a bed and a
+# workstation they can path to.
+#
 # ~x ~y ~z are offsets from the template's origin corner, resolved at placement.
+# Positions taken from a farm verified producing iron - 53 ingots in its chest
+# when it was captured.
 #
-# Blocks alone do not make an iron farm. It needs three villagers who can see a
-# zombie they cannot reach, each with a bed and a workstation they can path to.
-# Fill in the real coordinates once you have exported a farm that works.
-#
-# The zombie must not despawn and must not move: NoAI stops it wandering,
-# PersistenceRequired stops it vanishing, Silent stops it being a nuisance.
-#
-# /summon minecraft:villager ~5 ~2 ~5 {VillagerData:{profession:"minecraft:farmer",level:2},PersistenceRequired:1b}
-# /summon minecraft:villager ~5 ~2 ~7 {VillagerData:{profession:"minecraft:librarian",level:2},PersistenceRequired:1b}
-# /summon minecraft:villager ~7 ~2 ~5 {VillagerData:{profession:"minecraft:cleric",level:2},PersistenceRequired:1b}
-# /summon minecraft:zombie ~6 ~5 ~6 {NoAI:1b,Silent:1b,PersistenceRequired:1b,IsBaby:0b}
+# THE ZOMBIE RIDES A BOAT. A boat is an entity, so a .schem cannot carry it, and
+# it is the whole containment: a zombie in a boat cannot move at all, while
+# villagers still register it as hostile and panic. A bare zombie summoned into
+# the same cell drifted around inside it - which is not the same design. It
+# keeps its AI on purpose: a NoAI zombie is not detected as hostile at all.
+
+/summon minecraft:villager ~7 ~3 ~4 {VillagerData:{profession:"minecraft:fletcher",level:2,type:"minecraft:plains"},PersistenceRequired:1b}
+/summon minecraft:villager ~7 ~3 ~6 {VillagerData:{profession:"minecraft:fletcher",level:2,type:"minecraft:plains"},PersistenceRequired:1b}
+/summon minecraft:villager ~10 ~3 ~7 {VillagerData:{profession:"minecraft:fletcher",level:2,type:"minecraft:plains"},PersistenceRequired:1b}
+/summon minecraft:oak_boat ~2.5 ~2 ~5.7 {Passengers:[{id:"minecraft:zombie",Silent:1b,PersistenceRequired:1b}]}

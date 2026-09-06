@@ -38,13 +38,18 @@ check('classify: an ordinary building is left to the model',
   classify.byKeyword('a gothic keep with two towers') === null)
 
 // --- the registry ----------------------------------------------------------
-check('templates: a scaffold with no .schem is not offered as placeable',
-  !templates.list().includes('iron_farm'),
-  templates.list().join(','))
-check('templates: but it can still be described',
-  templates.describe('iron_farm').meta.scaffold === true)
-check('templates: an unusable template is not matched by a request',
-  classify.matchTemplate('build me an iron farm') === null)
+// iron_farm is no longer a scaffold: it was exported from a farm on the
+// sandbox that was producing iron (53 ingots in the chest when captured). These
+// used to assert the opposite and correctly failed the moment that happened.
+check('templates: iron_farm has a .schem and is placeable',
+  templates.list().includes('iron_farm'), templates.list().join(','))
+check('templates: iron_farm is matched by a plain request',
+  classify.matchTemplate('build me an iron farm') === 'iron_farm')
+check('templates: iron_farm carries its entities in setup.txt',
+  templates.describe('iron_farm').setup.length === 4,
+  `${templates.describe('iron_farm').setup.length} setup commands`)
+check('templates: the setup summons a zombie WITH its AI (a NoAI one is never registered as hostile)',
+  templates.describe('iron_farm').setup.some(l => /zombie/.test(l) && !/NoAI:1b/.test(l)))
 check('templates: a bad name is refused', (() => {
   try { templates.describe('../../etc'); return false } catch (err) { return true }
 })())
@@ -79,12 +84,19 @@ check('protect: a decorator cell outside it is not protected',
 
 // --- the shipped scaffold --------------------------------------------------
 const dir = path.join(templates.DIR, 'iron_farm')
-check('iron_farm: ships a readme that says it is not a working farm',
-  fs.readFileSync(path.join(dir, 'readme.md'), 'utf8').includes('not a working farm'))
-check('iron_farm: ships a setup.txt with summon examples',
-  fs.readFileSync(path.join(dir, 'setup.txt'), 'utf8').includes('/summon minecraft:villager'))
-check('iron_farm: its setup lines are all commented out until someone fills them in',
-  templates.describe('iron_farm').setup.length === 0)
+check('iron_farm: setup summons three villagers with beds to claim',
+  templates.describe('iron_farm').setup.filter(l => /villager/.test(l)).length === 3)
+
+// The bug that made the first placed copy a dead farm: block STATES were
+// dropped, so every bed landed as a default unpaired foot facing north and
+// every trapdoor lay flat on the floor. Villagers had no home; the zombie
+// walked free and killed one of them.
+const { specOf } = require('../src/building/blockspec')
+check('specOf: carries block state into the spec string',
+  specOf({ name: 'white_bed', getProperties: () => ({ facing: 'east', part: 'foot', occupied: false }) }) ===
+    'white_bed[facing=east,occupied=false,part=foot]')
+check('specOf: a stateless block is just its name',
+  specOf({ name: 'stone_bricks', getProperties: () => ({}) }) === 'stone_bricks')
 
 console.log(failures ? `\n${failures} FAILURES` : '\nall passed')
 process.exit(failures ? 1 : 0)

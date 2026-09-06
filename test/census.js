@@ -2,6 +2,9 @@ const m=require('mineflayer'); const {Vec3}=require('vec3')
 const O=new Vec3(1122,-60,1220)
 const b=m.createBot({host:'127.0.0.1',port:25566,username:'Scanner',version:'26.1'})
 b.once('spawn',async()=>{
+  // Normal difficulty means mobs fight back; a scanner that dies mid-read
+  // returns half a world. Spectator is immune and still reads blocks.
+  b.chat('/gamemode spectator')
   await b.waitForTicks(90); await b.waitForChunksToLoad().catch(()=>{}); await b.waitForTicks(70)
   const tally={}, add=(k)=>tally[k]=(tally[k]||0)+1
   let panes=0, panesConnected=0, torches=0, torchDefault=0, lanterns=0, lanternHang=0

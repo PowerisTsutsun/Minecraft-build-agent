@@ -3,6 +3,7 @@
 const fs = require('fs')
 const path = require('path')
 const { Vec3 } = require('vec3')
+const { specOf } = require('./blockspec')
 const { Schematic } = require('prismarine-schematic')
 
 // ---------------------------------------------------------------------------
@@ -171,7 +172,7 @@ function schematicToBlocks (schematic) {
         if (!block || block.name === 'air') continue
         blocks.push({
           pos: new Vec3(x - start.x, y - start.y, z - start.z),
-          name: block.name
+          name: specOf(block)
         })
       }
     }

@@ -3,6 +3,7 @@
 const fs = require('fs').promises
 const path = require('path')
 const { Vec3 } = require('vec3')
+const { specOf } = require('./blockspec')
 const { outsideIn } = require('./primitives')
 
 // ---------------------------------------------------------------------------
@@ -71,7 +72,7 @@ function schematicToBlocks (schematic) {
 
         const rel = new Vec3(x - start.x, y - start.y, z - start.z)
         if (!byLayer.has(rel.y)) byLayer.set(rel.y, [])
-        byLayer.get(rel.y).push({ pos: rel, name: block.name })
+        byLayer.get(rel.y).push({ pos: rel, name: specOf(block) })
       }
     }
   }

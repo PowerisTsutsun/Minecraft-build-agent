@@ -22,6 +22,9 @@ const bot = mineflayer.createBot({
 })
 
 bot.once('spawn', async () => {
+  // Normal difficulty means mobs fight back; a scanner that dies mid-read
+  // returns half a world. Spectator is immune and still reads blocks.
+  b.chat('/gamemode spectator')
   bot.chat(`/tp Scanner ${ORIGIN.x + 5} ${ORIGIN.y + 30} ${ORIGIN.z + 5}`)
   await bot.waitForTicks(40)
   await bot.waitForChunksToLoad().catch(() => {})

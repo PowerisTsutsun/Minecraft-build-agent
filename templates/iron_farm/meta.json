@@ -1,7 +1,44 @@
 {
   "name": "iron_farm",
-  "scaffold": true,
-  "note": "No .schem yet - see readme.md. Placing this will fail until a working farm is exported into it.",
-  "needs": ["3 villagers", "1 zombie with NoAI", "3 beds", "3 workstations"],
-  "produces": "iron ingots at the collection chest"
+  "size": {
+    "x": 14,
+    "y": 11,
+    "z": 11
+  },
+  "version": "26.1",
+  "exported": "2026-09-06T06:27:41.493Z",
+  "blocks": 628,
+  "protect": {
+    "from": {
+      "x": 0,
+      "y": 0,
+      "z": 0
+    },
+    "to": {
+      "x": 13,
+      "y": 10,
+      "z": 10
+    }
+  },
+  "notable": {
+    "water": 17,
+    "white_bed": 6,
+    "chest": 2,
+    "hopper": 1,
+    "lava": 1,
+    "oak_wall_sign": 1
+  },
+  "needs": [
+    "3 villagers",
+    "1 zombie with AI",
+    "3 beds",
+    "3 workstations"
+  ],
+  "produces": "iron ingots at the double chest",
+  "source": "captured from a working farm on the sandbox, verified with 23 iron ingots in its chest",
+  "origin_was": {
+    "x": 1804,
+    "y": -62,
+    "z": 993
+  }
 }

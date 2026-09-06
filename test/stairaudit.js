@@ -4,6 +4,9 @@ const b=m.createBot({host:'127.0.0.1',port:25566,username:'Scanner',version:'26.
 bot_main()
 function bot_main(){
 b.once('spawn',async()=>{
+  // Normal difficulty means mobs fight back; a scanner that dies mid-read
+  // returns half a world. Spectator is immune and still reads blocks.
+  b.chat('/gamemode spectator')
   await b.waitForTicks(90); await b.waitForChunksToLoad().catch(()=>{}); await b.waitForTicks(70)
   const solid=p=>{const q=b.blockAt(p); return q && q.boundingBox==='block'}
   for (const [label, ox,oy,oz, axis, width, rise] of [
