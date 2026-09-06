@@ -166,8 +166,17 @@ function shapeFor (action, primitives, ctx) {
 const CLOBBER_RATIO = 0.3
 const CLOBBER_MIN_CELLS = 8
 
-// Ops small and deliberate enough that an overlap is untidy rather than wrong.
-const SOFT_CLOBBER_OPS = new Set(['window', 'door', 'blocks', 'stairs', 'spiral', 'column', 'pilaster', 'buttress'])
+// Ops an overlap is untidy on rather than wrong.
+//
+// Two kinds. Small deliberate things - a window, a stair - where two of them
+// sharing cells still leaves something that works. And FOUNDATIONS: a plinth or
+// a floor exists to be built upon, so a wall covering most of one is the point,
+// not a mistake. The lint refused a perfectly good keep for putting its walls
+// on its own plinth, which is the one thing a plinth is for.
+const SOFT_CLOBBER_OPS = new Set([
+  'window', 'door', 'blocks', 'stairs', 'spiral', 'column', 'pilaster', 'buttress',
+  'plinth', 'floor'
+])
 
 function renderPlan (plan, primitives, opts = {}) {
   const isKnownBlock = opts.isKnownBlock || (() => true)

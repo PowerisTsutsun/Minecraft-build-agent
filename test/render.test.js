@@ -275,5 +275,40 @@ for (const [label, raw] of REAL_PLANS) {
     doubleState.slice(0, 2).map(b => b.name).join(' '))
 }
 
+
+
+// A plinth exists to be built on. The lint refused a keep for putting its walls
+// on its own plinth - 78% covered, which is what a plinth covered by a building
+// looks like.
+const onPlinth = build({
+  summary: 'a wall on its own plinth',
+  shell: [
+    { op: 'plinth', material: 'cobblestone', offset: { x: 0, y: 0, z: 0 }, anchor: 'corner', width: 15, depth: 15, height: 1 },
+    { op: 'box', material: 'stone_bricks', offset: { x: 0, y: 1, z: 0 }, anchor: 'corner', width: 15, depth: 15, height: 8, hollow: true }
+  ]
+})
+check('lint: a building may stand on its own plinth',
+  (onPlinth.errors || []).length === 0, (onPlinth.errors || [])[0])
+
+const onFloor = build({
+  summary: 'furniture on a floor',
+  shell: [
+    { op: 'floor', material: 'oak_planks', offset: { x: 0, y: 0, z: 0 }, anchor: 'corner', width: 11, depth: 11 },
+    { op: 'floor', material: 'stone', offset: { x: 0, y: 0, z: 0 }, anchor: 'corner', width: 11, depth: 11 }
+  ]
+})
+check('lint: a floor relaid over a floor is not fatal either',
+  (onFloor.errors || []).length === 0, (onFloor.errors || [])[0])
+
+// But a wall burying a wall is still refused.
+const wallOnWall = build({
+  summary: 'two walls in one place',
+  shell: [
+    { op: 'box', material: 'stone_bricks', offset: { x: 0, y: 0, z: 0 }, anchor: 'corner', width: 11, depth: 11, height: 8, hollow: true },
+    { op: 'box', material: 'deepslate_bricks', offset: { x: 0, y: 0, z: 0 }, anchor: 'corner', width: 11, depth: 11, height: 8, hollow: true }
+  ]
+})
+check('lint: a wall burying a wall is still refused', (wallOnWall.errors || []).length > 0)
+
 console.log(failures ? `\n${failures} FAILURES` : '\nall passed')
 process.exit(failures ? 1 : 0)
