@@ -251,5 +251,75 @@ check('decor.skip: turns off each named habit',
   !(bare.decor || {}).quoins && !(bare.decor || {}).arrow_slits && !(bare.decor || {}).lights,
   JSON.stringify(bare.decor))
 
+
+
+// --- style habits ----------------------------------------------------------
+// The universal habits run for every style; these are what make one style look
+// different from another rather than just differently coloured.
+function styled (style) {
+  const v = validatePlan({
+    summary: 'styled',
+    palette: { name: 'medieval_stone' },
+    decor: { style, intensity: 0.7 },
+    shell: [
+      { op: 'tower', offset: { x: 0, y: 0, z: 0 }, diameter: 11, height: 22, storeys: 3, top: 'battlements' },
+      { op: 'hall', offset: { x: 16, y: 0, z: 0 }, width: 13, depth: 17, storeys: 2 }
+    ]
+  }, realBlock)
+  if (v.errors.length) return { errors: v.errors, blocks: [], decor: {} }
+  return renderPlan(v, primitives, { isKnownBlock: realBlock })
+}
+
+const med = styled('medieval_stone')
+const timber = styled('timber_castle')
+const fantasy = styled('fantasy_spire')
+const none = styled('plain')
+
+for (const [name, out] of [['medieval_stone', med], ['timber_castle', timber], ['fantasy_spire', fantasy]]) {
+  check(`style ${name}: renders without errors`, (out.errors || []).length === 0, (out.errors || [])[0])
+  check(`style ${name}: every id is a real block`,
+    out.blocks.every(b => realBlock(b.name)),
+    [...new Set(out.blocks.map(b => b.name).filter(n => !realBlock(n)))].slice(0, 3).join(' '))
+}
+
+check('style plain: adds nothing at all', Object.keys(none.decor || {}).length === 0, JSON.stringify(none.decor))
+
+check('medieval_stone: a crenellated crown', (med.decor || {}).crown > 0)
+check('medieval_stone: vines age the walls', (med.decor || {}).vines > 0)
+check('medieval_stone: banners on the principal faces', (med.decor || {}).banners > 0)
+check('medieval_stone: banners face outward',
+  med.blocks.filter(b => /wall_banner/.test(b.name)).every(b => /facing=/.test(b.name)))
+check('medieval_stone: vines attach to a face',
+  med.blocks.filter(b => /^vine/.test(b.name)).every(b => /(north|south|east|west)=true/.test(b.name)))
+
+check('timber_castle: the upper storey becomes framing', (timber.decor || {}).timber_upper > 0)
+check('timber_castle: a chimney', (timber.decor || {}).chimney > 0)
+check('timber_castle: framing uses posts and infill, not the wall block',
+  timber.blocks.some(b => /stripped_dark_oak_log/.test(b.name)) &&
+  timber.blocks.some(b => b.name === 'white_terracotta'))
+
+check('fantasy_spire: the top glows', (fantasy.decor || {}).glow > 0)
+check('fantasy_spire: light is recessed into the upper storey',
+  fantasy.blocks.filter(b => b.name === 'sea_lantern').every(b => b.pos.y > 14),
+  'glow blocks appeared low down')
+
+// The three styles must actually differ from one another.
+const sig = out => JSON.stringify(Object.keys(out.decor || {}).sort())
+check('styles: each produces a different set of habits',
+  sig(med) !== sig(timber) && sig(timber) !== sig(fantasy) && sig(med) !== sig(fantasy),
+  `${sig(med)} | ${sig(timber)} | ${sig(fantasy)}`)
+
+// Greenery and intensity are honoured.
+const dry = (() => {
+  const v = validatePlan({
+    summary: 'dry',
+    palette: { name: 'medieval_stone' },
+    decor: { style: 'medieval_stone', greenery: false },
+    shell: [{ op: 'tower', offset: { x: 0, y: 0, z: 0 }, diameter: 11, height: 22, storeys: 3, top: 'battlements' }]
+  }, realBlock)
+  return renderPlan(v, primitives, { isKnownBlock: realBlock })
+})()
+check('decor.greenery false: no vines', !(dry.decor || {}).vines, `${(dry.decor || {}).vines}`)
+
 console.log(failures ? `\n${failures} FAILURES` : '\nall passed')
 process.exit(failures ? 1 : 0)

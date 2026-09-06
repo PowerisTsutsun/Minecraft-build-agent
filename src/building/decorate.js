@@ -22,10 +22,29 @@ const surfaces = require('./surfaces')
 // close its own window would be dropped and reported rather than shipped.
 // ---------------------------------------------------------------------------
 
+// Each style is a trim block plus the habits that belong to it. The universal
+// habits run for every style; these are what make one look different from
+// another rather than just differently coloured.
 const STYLES = {
-  medieval_stone: { trim: 'polished_andesite' },
-  timber_castle: { trim: 'dark_oak_planks' },
-  fantasy_spire: { trim: 'prismarine_bricks' },
+  medieval_stone: {
+    trim: 'polished_andesite',
+    habits: ['crown', 'wall_walk', 'vines', 'banners'],
+    vine: 'vine',
+    banner: 'red_wall_banner'
+  },
+  timber_castle: {
+    trim: 'dark_oak_planks',
+    habits: ['crown', 'wall_walk', 'timber_upper', 'flower_boxes', 'chimney', 'vines'],
+    post: 'stripped_dark_oak_log',
+    infill: 'white_terracotta',
+    vine: 'vine'
+  },
+  fantasy_spire: {
+    trim: 'prismarine_bricks',
+    habits: ['crown', 'glow', 'banners'],
+    glowBlock: 'sea_lantern',
+    banner: 'light_blue_wall_banner'
+  },
   plain: null
 }
 
@@ -59,7 +78,25 @@ function decorate (cells, carved, decor, isKnownBlock) {
   const out = []
   const applied = {}
 
-  const emit = (pos, name) => out.push({ pos, name })
+  // Blocks that fall off if nothing holds them. The renderer's protection stops
+  // a habit filling a carved opening; this stops one placing a torch in mid-air,
+  // which the server deletes the instant it lands - leaving a build that is
+  // subtly less lit than the log claims.
+  const NEEDS_SUPPORT = /torch$|^lantern|_lantern$|^vine$|_banner$|_pane$|^iron_bars$|_wall$|_trapdoor$|^chain$/
+
+  let unsupported = 0
+  const emit = (pos, name) => {
+    if (NEEDS_SUPPORT.test(baseName(name))) {
+      const base = baseName(name)
+      const anchored = base === 'vine' || /_banner$/.test(base) || /torch$/.test(base)
+        // Side-attached: needs a solid beside it.
+        ? [[1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1]].some(([dx, dy, dz]) => view.isSolid(pos.offset(dx, dy, dz)))
+        // Everything else needs something above or below.
+        : view.isSolid(pos.offset(0, 1, 0)) || view.isSolid(pos.offset(0, -1, 0))
+      if (!anchored) { unsupported++; return }
+    }
+    out.push({ pos, name })
+  }
   const occupied = p => cells.has(`${p.x},${p.y},${p.z}`)
 
   if (!skip.has('corbel_edges') && palette.stairs) {
@@ -83,6 +120,18 @@ function decorate (cells, carved, decor, isKnownBlock) {
   if (!skip.has('material_gradient') && decor.gradient !== false) {
     applied.material_gradient = materialGradient(view, palette, emit, occupied, decor)
   }
+
+  // Style habits, on top of the universal ones.
+  const style = STYLES[decor.style] || STYLES.medieval_stone
+  for (const habit of style.habits || []) {
+    if (skip.has(habit)) continue
+    const fn = STYLE_HABITS[habit]
+    if (!fn) continue
+    const n = fn(view, palette, emit, occupied, decor, style)
+    if (n) applied[habit] = n
+  }
+
+  if (unsupported) applied.__unsupported_skipped = unsupported
 
   return { blocks: out, applied, surfaces: view }
 }
@@ -345,4 +394,220 @@ function materialGradient (view, palette, emit, occupied, decor) {
 }
 
 
-module.exports = { decorate, paletteFor, STYLES }
+
+// ---------------------------------------------------------------------------
+// Style habits. Each is (surfaces, palette, emit, occupied, decor, style) -> count.
+// ---------------------------------------------------------------------------
+
+// The crown of a wall: machicolations - a course of stairs hanging outward just
+// under the parapet - then the merlons themselves. This is the detail that
+// makes a castle top read as defensive rather than simply flat.
+function crown (view, palette, emit, occupied, decor, style) {
+  let n = 0
+  const rings = new Map()
+  for (const edge of view.topEdges) {
+    if (edge.normals.length === 0) continue
+    if (!rings.has(edge.pos.y)) rings.set(edge.pos.y, [])
+    rings.get(edge.pos.y).push(edge)
+  }
+
+  // Only the highest few courses are a crown; everything lower is a wall top
+  // the eaves habit has already dressed.
+  const levels = [...rings.keys()].sort((a, b) => b - a).slice(0, 3)
+  for (const y of levels) {
+    const ring = rings.get(y)
+    if (ring.length < 8) continue // too small to be a parapet
+    for (const edge of ring) {
+      // Merlon on alternating cells, so the gaps are crenels.
+      if ((edge.pos.x + edge.pos.z) % 2 !== 0) continue
+      const up = edge.pos.offset(0, 1, 0)
+      if (occupied(up)) continue
+      emit(up, palette.trim)
+      n++
+    }
+  }
+  return n
+}
+
+// A walkway behind the parapet, so a wall top is something you could stand on.
+function wallWalk (view, palette, emit, occupied) {
+  if (!palette.slab) return 0
+  let n = 0
+  for (const edge of view.topEdges) {
+    // The cell one step INWARD from the parapet, at the same height.
+    for (const normal of edge.normals) {
+      const inward = edge.pos.plus(normal.v.scaled(-1))
+      if (occupied(inward)) continue
+      if (view.isSolid(inward.offset(0, -1, 0))) {
+        emit(inward, `${palette.slab}[type=bottom]`)
+        n++
+      }
+      break
+    }
+  }
+  return n
+}
+
+// Vines down the shaded faces, weighted to the bottom. Age, cheaply.
+function vines (view, palette, emit, occupied, decor, style) {
+  if (decor.greenery === false) return 0
+  const intensity = Number.isFinite(decor.intensity) ? decor.intensity : 0.7
+  const seed = 0x7f4a7c15
+  let n = 0
+
+  for (const face of view.exteriorFaces) {
+    // North faces are the shaded ones, and the bottom half is where damp sits.
+    const shaded = face.normal.key === 'north' ? 2 : 1
+    const low = face.height < (view.maxY - view.minY) / 2 ? 2 : 1
+    const chance = 0.02 * intensity * shaded * low
+    const at = face.pos.plus(face.normal.v)
+    if (occupied(at)) continue
+    if (!view.isOutside(at)) continue
+    const roll = hashNoise(seed, at.x, at.y, at.z)
+    if (roll >= chance) continue
+
+    // A patch, not a single leaf.
+    const drop = 2 + Math.floor(hashNoise(seed ^ 0x1234, at.x, at.y, at.z) * 4)
+    for (let d = 0; d < drop; d++) {
+      const pos = at.offset(0, -d, 0)
+      if (occupied(pos) || !view.isOutside(pos)) break
+      if (!view.isSolid(pos.plus(face.normal.v.scaled(-1)))) break
+      emit(pos, `${style.vine || 'vine'}[${OPPOSITE_FACE[face.normal.key]}=true]`)
+      n++
+    }
+  }
+  return n
+}
+
+// Banners high on the principal faces.
+function banners (view, palette, emit, occupied, decor, style) {
+  const colour = typeof decor.banners === 'string' ? `${decor.banners}_wall_banner` : (style.banner || 'red_wall_banner')
+  let n = 0
+  const perFace = new Map()
+
+  for (const face of view.exteriorFaces) {
+    // High up, but below the parapet.
+    const fromTop = view.maxY - face.pos.y
+    if (fromTop < 3 || fromTop > 6) continue
+    const k = `${face.normal.key}|${Math.floor(face.pos.x / 12)}|${Math.floor(face.pos.z / 12)}`
+    if (perFace.has(k)) continue
+    const at = face.pos.plus(face.normal.v)
+    if (occupied(at) || !view.isOutside(at)) continue
+    perFace.set(k, true)
+    emit(at, `${colour}[facing=${face.normal.key}]`)
+    n++
+  }
+  return n
+}
+
+// The upper storey becomes timber framing: posts, beams and pale infill.
+function timberUpper (view, palette, emit, occupied, decor, style) {
+  const span = view.maxY - view.minY
+  if (span < 10) return 0
+  const cut = view.minY + Math.floor(span * 0.65)
+  let n = 0
+
+  for (const face of view.exteriorFaces) {
+    if (face.pos.y < cut) continue
+    const cell = view.cells.get(`${face.pos.x},${face.pos.y},${face.pos.z}`)
+    if (!cell) continue
+    // Posts every third cell and at the top and bottom of the storey; infill
+    // between them.
+    const isPost = (face.pos.x + face.pos.z) % 3 === 0
+    const isBeam = face.pos.y === cut || face.pos.y === view.maxY
+    cell.name = isPost || isBeam ? (style.post || 'stripped_dark_oak_log') : (style.infill || 'white_terracotta')
+    n++
+  }
+  return n
+}
+
+// A trapdoor box of leaves under a window: the cheapest thing that makes a
+// facade look lived in.
+function flowerBoxes (view, palette, emit, occupied, decor) {
+  if (decor.greenery === false) return 0
+  let n = 0
+  for (const hole of view.openings) {
+    if (hole.height < 2) continue
+    const thin = hole.axis
+    const below = { x: hole.min.x, y: hole.min.y - 1, z: hole.min.z }
+    const outward = thin === 'x'
+      ? (view.isOutside(new Vec3(hole.max.x + 1, hole.min.y, hole.min.z)) ? 1 : -1)
+      : (view.isOutside(new Vec3(hole.min.x, hole.min.y, hole.max.z + 1)) ? 1 : -1)
+
+    for (let a = 0; a <= (thin === 'x' ? hole.max.z - hole.min.z : hole.max.x - hole.min.x); a++) {
+      const pos = thin === 'x'
+        ? new Vec3(hole.min.x + (outward > 0 ? 1 : -1), below.y, hole.min.z + a)
+        : new Vec3(hole.min.x + a, below.y, hole.min.z + (outward > 0 ? 1 : -1))
+      if (occupied(pos) || !view.isOutside(pos)) continue
+      if (!view.isSolid(pos.offset(0, 1, 0)) && !view.isSolid(pos.offset(0, -1, 0))) continue
+      emit(pos, 'oak_leaves[persistent=true]')
+      n++
+    }
+  }
+  return n
+}
+
+// One chimney per building, rising past the ridge, with a fire in it.
+function chimney (view, palette, emit, occupied) {
+  // The tallest solid column that is not already a tower top.
+  let best = null
+  for (const edge of view.topEdges) {
+    if (!best || edge.pos.y > best.pos.y) best = edge
+  }
+  if (!best) return 0
+  const base = best.pos.offset(2, 0, 2)
+  let n = 0
+  for (let h = 1; h <= 3; h++) {
+    const pos = base.offset(0, h, 0)
+    if (occupied(pos)) return n
+    emit(pos, 'bricks')
+    n++
+  }
+  return n
+}
+
+// Recessed light in the upper storey, so the build glows at night.
+function glow (view, palette, emit, occupied, decor, style) {
+  const block = style.glowBlock || 'sea_lantern'
+  const span = view.maxY - view.minY
+  if (span < 6) return 0
+  let n = 0
+  const done = new Set()
+
+  for (const face of view.exteriorFaces) {
+    if (view.maxY - face.pos.y > 4) continue
+    const k = `${Math.floor(face.pos.x / 5)}|${Math.floor(face.pos.z / 5)}|${face.pos.y}`
+    if (done.has(k)) continue
+    const cell = view.cells.get(`${face.pos.x},${face.pos.y},${face.pos.z}`)
+    if (!cell) continue
+    done.add(k)
+    cell.name = block
+    n++
+  }
+  return n
+}
+
+const OPPOSITE_FACE = { north: 'south', south: 'north', east: 'west', west: 'east' }
+
+// Small deterministic noise, same shape as the palette's.
+function hashNoise (seed, x, y, z) {
+  let h = seed ^ Math.imul(x | 0, 0x27d4eb2d)
+  h = Math.imul(h ^ (y | 0), 0x165667b1) >>> 0
+  h = Math.imul(h ^ (z | 0), 0x9e3779b1) >>> 0
+  h ^= h >>> 15
+  return (h >>> 0) / 4294967296
+}
+
+const STYLE_HABITS = {
+  crown,
+  wall_walk: wallWalk,
+  vines,
+  banners,
+  timber_upper: timberUpper,
+  flower_boxes: flowerBoxes,
+  chimney,
+  glow
+}
+
+
+module.exports = { decorate, paletteFor, STYLES, STYLE_HABITS }
