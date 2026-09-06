@@ -338,6 +338,32 @@ function renderPlan (plan, primitives, opts = {}) {
   }
   for (const w of plan.paletteWarnings || []) warnings.push(w)
 
+  // NOTHING SHOULD FLOAT. A block with no solid neighbour on any of its six
+  // sides is either a mistake or a deliberate feature nobody asked for, and
+  // until now there was no check for it at all - an acceptance criterion with
+  // nothing behind it. A live tower came back with 41 isolated blocks and the
+  // build reported success.
+  //
+  // Reported rather than refused: some are legitimate (a lantern on a chain,
+  // the tip of a spire), and a count with coordinates is what makes the
+  // illegitimate ones findable.
+  const floating = []
+  for (const cell of cells.values()) {
+    const base = baseName(cell.name)
+    if (base === 'air' || NON_SEALING.has(base)) continue
+    const p = cell.pos
+    const held = [[0, -1, 0], [0, 1, 0], [1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1]]
+      .some(([dx, dy, dz]) => {
+        const n = cells.get(key(p.x + dx, p.y + dy, p.z + dz))
+        return n && baseName(n.name) !== 'air' && !NON_SEALING.has(baseName(n.name))
+      })
+    if (!held) floating.push(cell)
+  }
+  if (floating.length) {
+    const where = floating.slice(0, 3).map(c => `${c.name} at (${c.pos.x}, ${c.pos.y}, ${c.pos.z})`).join(', ')
+    warnings.push(`${floating.length} block${floating.length === 1 ? '' : 's'} float with nothing touching them - e.g. ${where}`)
+  }
+
   orientCells(cells, warnings)
 
   if (cells.size > MAX_BLOCKS) {

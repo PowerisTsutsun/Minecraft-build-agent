@@ -118,5 +118,20 @@ check('pipeline: every id is a real block', bogus.length === 0, bogus.slice(0, 3
 const doubled = dressed.blocks.filter(b => (b.name.match(/\[/g) || []).length > 1)
 check('pipeline: no double-stated ids', doubled.length === 0, doubled.slice(0, 2).map(b => b.name).join(' '))
 
+
+
+// A hollow cone's shell test leaves isolated cells at some radius-to-height
+// ratios - a radius-5, height-8 cone shed twelve corner cells touching nothing,
+// and the cornice habit then dressed each one. Tuning the shell thickness made
+// it worse in both directions; the repair pass is what fixes it.
+for (const [r, h] of [[3, 6], [4, 8], [5, 8], [5, 10], [6, 12], [7, 14], [8, 16]]) {
+  const c = primitives.cone({ radius: r, height: h, material: 'stone', hollow: true })
+  const set = new Set(c.map(b => `${b.pos.x},${b.pos.y},${b.pos.z}`))
+  const isolated = c.filter(b => ![[0, -1, 0], [0, 1, 0], [1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1]]
+    .some(([dx, dy, dz]) => set.has(`${b.pos.x + dx},${b.pos.y + dy},${b.pos.z + dz}`)))
+  check(`cone r${r} h${h}: every cell touches another`, isolated.length === 0,
+    `${isolated.length} isolated`)
+}
+
 console.log(failures ? `\n${failures} FAILURES` : '\nall passed')
 process.exit(failures ? 1 : 0)

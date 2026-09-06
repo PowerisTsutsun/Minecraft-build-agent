@@ -157,6 +157,12 @@ function corbelEdges (view, palette, emit, occupied) {
     })
     if (stepsDown) continue
 
+    // And do not dress a cell that is itself unsupported: a cornice hung off a
+    // floating roof cell turns one stray block into three.
+    const anchored = [[0, -1, 0], [1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1]]
+      .some(([dx, dy, dz]) => view.isSolid(edge.pos.offset(dx, dy, dz)))
+    if (!anchored) continue
+
     for (const normal of edge.normals) {
       const at = edge.pos.plus(normal.v)
       if (occupied(at)) continue

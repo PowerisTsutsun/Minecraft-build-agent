@@ -231,6 +231,53 @@ function cone ({ radius, height, material, hollow = true, y = 0 }) {
     blocks.push(...outsideIn(layer, r * 2 + 1, r * 2 + 1))
   }
 
+  // CONNECT THE SHELL. A hollow cone's "top of its own column" test leaves
+  // isolated cells at some radius-to-height ratios - a radius-5, height-8 cone
+  // sheds twelve corner cells that touch nothing at all, and the cornice habit
+  // then dutifully dresses each one. Thinning or thickening the shell makes it
+  // worse, not better (measured across seven cone sizes).
+  //
+  // A cone widens downward, so the cell directly below an isolated one is
+  // always inside the volume: adding it both anchors the stray cell and
+  // continues the slope, which is what the shell was trying to express.
+  if (hollow) {
+    const present = new Set(blocks.map(b => `${b.pos.x},${b.pos.y},${b.pos.z}`))
+    const touching = b => [[0, -1, 0], [0, 1, 0], [1, 0, 0], [-1, 0, 0], [0, 0, 1], [0, 0, -1]]
+      .some(([dx, dy, dz]) => present.has(`${b.pos.x + dx},${b.pos.y + dy},${b.pos.z + dz}`))
+
+    // Connect INWARD, not downward. The cell below an orphan can be skipped
+    // too, so adding it just moves the stray one level down; the cell toward
+    // the cone's axis is always inside the volume at that level, so a lateral
+    // step always lands on solid ground. Repeat, because the cell added can
+    // itself need a neighbour.
+    for (let pass = 0; pass < 4; pass++) {
+      const orphaned = blocks.filter(b => !touching(b))
+      if (!orphaned.length) break
+      let added = 0
+      for (const orphan of orphaned) {
+        const dx = orphan.pos.x - r
+        const dz = orphan.pos.z - r
+        // One step toward the axis on whichever axis is further out.
+        // The apex sits ON the axis, so there is no inward step to take - it
+        // has to reach down to the ring below instead.
+        const onAxis = dx === 0 && dz === 0
+        const step = onAxis
+          ? { x: 0, y: -1, z: 0 }
+          : (Math.abs(dx) >= Math.abs(dz)
+              ? { x: -Math.sign(dx), y: 0, z: 0 }
+              : { x: 0, y: 0, z: -Math.sign(dz) })
+        const inward = orphan.pos.offset(step.x, step.y, step.z)
+        if (inward.y < y) continue
+        const k = `${inward.x},${inward.y},${inward.z}`
+        if (present.has(k)) continue
+        present.add(k)
+        blocks.push({ pos: inward, name: orphan.name })
+        added++
+      }
+      if (!added) break
+    }
+  }
+
   return blocks
 }
 
@@ -798,16 +845,25 @@ function window ({
     }
   }
 
+  // A sill projects one block out from the wall face - which only works if
+  // there is wall behind it. On a CURVED wall the cell beside the opening has
+  // already fallen away, so a sill placed straight outward hangs in space: a
+  // round tower came back with 23 floating sills and lintels, each of which the
+  // cornice habit then dressed.
   const outward = f.normal
+  const supported = pos => !isSolid || isSolid(pos.plus(outward.scaled(-1)))
+
   if (sill) {
     for (let a = 0; a < width; a++) {
       const base = placeOnFace(start, f, a, -1, 1)[0].plus(outward)
+      if (!supported(base)) continue
       solid.push({ pos: base, name: sill })
     }
   }
   if (lintel) {
     for (let a = 0; a < width; a++) {
       const base = placeOnFace(start, f, a, height, 1)[0].plus(outward)
+      if (!supported(base)) continue
       solid.push({ pos: base, name: lintel })
     }
   }
