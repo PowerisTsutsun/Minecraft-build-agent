@@ -169,11 +169,21 @@ check('legacy: a single-list plan still renders', legacy.blocks.length === 2 && 
 const { SYSTEM_PROMPT } = require('../src/commands/llm')
 check('prompt: no backticks in the system prompt body', !SYSTEM_PROMPT.includes('`'),
   (SYSTEM_PROMPT.split('\n').find(l => l.includes('`')) || '').slice(0, 60))
-check('prompt: still documents every op',
-  ['floor', 'wall', 'box', 'sphere', 'cylinder', 'cone', 'pyramid', 'gable', 'arch', 'stairs', 'spiral', 'blocks']
-    .every(op => new RegExp('^- ?' + op + ':|^' + op + ':', 'm').test(SYSTEM_PROMPT)),
-  ['floor', 'wall', 'box', 'sphere', 'cylinder', 'cone', 'pyramid', 'gable', 'arch', 'stairs', 'spiral', 'blocks']
-    .filter(op => !new RegExp('^- ?' + op + ':|^' + op + ':', 'm').test(SYSTEM_PROMPT)).join(','))
+// The model has to know each op exists; how they are grouped in the prose is
+// the prompt's business. `cone`, `gable` and `house` are deliberately absent:
+// they still work, but `roof` and `hall` supersede them and naming both would
+// invite the model back to the lower-level one.
+const SUPERSEDED = new Set(['cone', 'gable', 'house'])
+const EVERY_OP = ['floor', 'wall', 'box', 'sphere', 'house', 'cylinder', 'cone', 'pyramid',
+  'gable', 'arch', 'stairs', 'window', 'door', 'eaves', 'trim_band', 'battlements',
+  'pilaster', 'buttress', 'plinth', 'column', 'roof', 'tower', 'hall', 'curtain_wall',
+  'gatehouse', 'spiral', 'blocks']
+const undocumented = EVERY_OP.filter(op => !SUPERSEDED.has(op) &&
+  !new RegExp('\\b' + op + '\\b').test(SYSTEM_PROMPT))
+check('prompt: names every op the model should reach for', undocumented.length === 0,
+  undocumented.join(','))
+check('prompt: keeps the superseded ops out of the way',
+  [...SUPERSEDED].every(op => !new RegExp('^- ?' + op + ':', 'm').test(SYSTEM_PROMPT)))
 
 
 
