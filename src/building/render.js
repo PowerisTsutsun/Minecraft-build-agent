@@ -193,6 +193,9 @@ function renderPlan (plan, primitives, opts = {}) {
   // the decorator runs in the middle of the sequence and has to go through
   // exactly the same protection and bookkeeping as everything else - a habit
   // that quietly refilled a doorway would be the original bug wearing a hat.
+  // Filled in as the sequence is assembled; writeAction runs against it.
+  let actions = []
+
   const writeAction = (action, i, blocks) => {
     footprint[i] = new Set()
     clobbered[i] = new Map()
@@ -202,8 +205,16 @@ function renderPlan (plan, primitives, opts = {}) {
       const k = key(pos.x, pos.y, pos.z)
       const isAir = baseName(b.name) === 'air'
 
+      // A macro's carve and its floors are designed together, so protection
+      // between them is meaningless - and it was actively destructive: a tower
+      // hollowed its shaft in carves and then had every one of its floors
+      // dropped as if they were a wall sealing a doorway. Every tower this
+      // built was one empty tube, and it passed every lint because the blocks
+      // that were there were all as planned.
       const carver = carvedBy.get(k)
-      if (!isAir && sealsOpening(b.name) && carver !== undefined && carver !== i && !PRECISE_OPS.has(action.op)) {
+      const sameMacro = carver !== undefined && action.__instance &&
+        actions[carver] && actions[carver].__instance === action.__instance
+      if (!isAir && !sameMacro && sealsOpening(b.name) && carver !== undefined && carver !== i && !PRECISE_OPS.has(action.op)) {
         drops.push({ pos, filler: i, carver, name: b.name })
         continue
       }
@@ -247,6 +258,10 @@ function renderPlan (plan, primitives, opts = {}) {
   }
 
   // shell and carves, then the decorator, then the model's own details.
+  actions = plan.actions.filter(a => a.phase !== 'details')
+    .concat([{ op: '__decor', phase: 'decor' }])
+    .concat(plan.actions.filter(a => a.phase === 'details'))
+
   const before = plan.actions.filter(a => a.phase !== 'details')
   const after = plan.actions.filter(a => a.phase === 'details')
   const sequence = []
@@ -284,7 +299,7 @@ function renderPlan (plan, primitives, opts = {}) {
     writeAction(action, i, placed(action, i))
   })
 
-  const actions = sequence
+  actions = sequence
 
   // Report a later action that buried most of an earlier one, within a phase.
   //

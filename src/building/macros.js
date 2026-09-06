@@ -58,9 +58,26 @@ function tower (a, palette) {
 
   shell.push({ op: 'plinth', material: pick(palette, 'base_rough', 'cobblestone'), offset: at(0, 0, 0), anchor: 'center', width: diameter, depth: diameter, height: 1, grow: 1 })
   shell.push({ op: 'cylinder', material: wall, offset: at(0, 1, 0), anchor: 'center', radius: r, height, hollow: true })
-  carves.push({ op: 'cylinder', material: 'air', offset: at(0, 2, 0), anchor: 'center', radius: r - 1, height: height - 1, hollow: false })
 
-  // Floors, and the stair that reaches each one.
+  // The hollowing goes in SHELL, immediately after the wall it hollows, and
+  // before the floors that divide it - not in carves.
+  //
+  // Phases order actions between different parts of a plan; inside one macro
+  // the order is mine to choose, and getting it wrong here was expensive. With
+  // the carve in carves it ran after every shell action and erased the floors;
+  // with the floors moved to details they landed after the DECORATOR, which
+  // then saw one undivided volume with no ceilings and lit none of it. Wall,
+  // hollow, floors, in that order, is what makes a tower have storeys that the
+  // decorator can see.
+  shell.push({ op: 'cylinder', material: 'air', offset: at(0, 2, 0), anchor: 'center', radius: r - 1, height: height - 1, hollow: false })
+
+  // Floors go in DETAILS, not shell.
+  //
+  // The interior carve is one air cylinder spanning the whole shaft, and carves
+  // run after shell - so floors placed in shell were erased by the hollowing
+  // that came after them. Every tower this macro built was a single empty tube
+  // with a stair spiralling through nothing, and it looked correct from outside
+  // and from every lint, because the blocks that were there were all as planned.
   const floorYs = []
   for (let s = 1; s <= storeys; s++) {
     const fy = 1 + s * STOREY
@@ -155,8 +172,11 @@ function hall (a, palette) {
 
   shell.push({ op: 'plinth', material: pick(palette, 'base_rough', 'cobblestone'), offset: at(0, 0, 0), anchor: 'corner', width, depth, height: 1, grow: 1 })
   shell.push({ op: 'box', material: wall, offset: at(0, 1, 0), anchor: 'corner', width, depth, height: wallH, hollow: true })
-  carves.push({ op: 'box', material: 'air', offset: at(1, 2, 1), anchor: 'corner', width: width - 2, depth: depth - 2, height: wallH - 2, hollow: false })
+  // Hollow immediately, before the floors divide it - see the tower.
+  shell.push({ op: 'box', material: 'air', offset: at(1, 2, 1), anchor: 'corner', width: width - 2, depth: depth - 2, height: wallH - 2, hollow: false })
 
+  // Same as the tower: the interior carve spans these, and carves run after
+  // shell, so a floor in shell is a floor that gets deleted.
   const floorYs = []
   for (let s = 1; s < storeys; s++) {
     const fy = 1 + s * STOREY

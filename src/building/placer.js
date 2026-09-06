@@ -436,7 +436,97 @@ function safeToDig (bot, block) {
   }
 }
 
+
+// ---------------------------------------------------------------------------
+// Finding somewhere to build.
+//
+// The origin used to be the player's position plus two blocks east, with no
+// check on what was already there. Build twice from one spot and the second
+// build lands inside the first - which is how a sandbox ends up as a pile of
+// overlapping castles.
+//
+// So: measure the footprint the plan actually needs, then walk outward from the
+// player in a widening ring until a site is clear of anything built. Ground
+// level is sampled per site rather than taken from the player, because a player
+// standing on a roof is not standing on the ground.
+// ---------------------------------------------------------------------------
+
+const SITE_STEP = 4
+const SITE_MAX_RINGS = 12
+
+// Is this footprint free of anything that looks built? Terrain is fine to
+// build on; walls, floors and roofs are not.
+function siteIsClear (bot, corner, width, depth, height) {
+  const NATURAL = /^(air|grass_block|dirt|stone|gravel|sand|sandstone|deepslate|water|snow|.*_leaves|.*_log|short_grass|tall_grass|fern|.*_flower|dandelion|poppy|bedrock|coarse_dirt|podzol|clay|granite|diorite|andesite|tuff|.*_ore|moss_block|rooted_dirt|mud)$/
+
+  // Sample rather than test every cell: a 40x40x30 box is 48,000 blockAt calls
+  // per candidate site, and there can be a dozen candidates.
+  const stepX = Math.max(1, Math.floor(width / 8))
+  const stepZ = Math.max(1, Math.floor(depth / 8))
+  const stepY = Math.max(1, Math.floor(height / 6))
+
+  for (let x = 0; x < width; x += stepX) {
+    for (let z = 0; z < depth; z += stepZ) {
+      for (let y = 0; y < height; y += stepY) {
+        const b = bot.blockAt(corner.offset(x, y, z))
+        if (!b) continue
+        if (!NATURAL.test(b.name)) return false
+      }
+    }
+  }
+  return true
+}
+
+// Walk outward from the player until the footprint fits on empty ground.
+function findSite (bot, near, footprint) {
+  const width = Math.max(1, footprint.width)
+  const depth = Math.max(1, footprint.depth)
+  const height = Math.max(1, footprint.height)
+  const base = near.floored()
+
+  for (let ring = 0; ring < SITE_MAX_RINGS; ring++) {
+    const r = ring * SITE_STEP + 3
+    // Ring order: east, south, west, north, then the diagonals - so the first
+    // build lands beside the player rather than behind them.
+    const offsets = ring === 0
+      ? [[3, 0]]
+      : [[r, 0], [0, r], [-r, 0], [0, -r], [r, r], [-r, r], [r, -r], [-r, -r]]
+
+    for (const [dx, dz] of offsets) {
+      const probe = base.offset(dx, 0, dz)
+      const groundY = findGroundY(bot, probe)
+      const corner = new Vec3(probe.x, groundY, probe.z)
+      if (siteIsClear(bot, corner, width, depth, height)) {
+        return { origin: corner, ring, searched: ring * 8 }
+      }
+    }
+  }
+  // Nothing clear within range - build beside the player anyway rather than
+  // refusing, and say so.
+  return { origin: new Vec3(base.x + 3, findGroundY(bot, base), base.z), ring: -1, searched: SITE_MAX_RINGS * 8 }
+}
+
+function footprintOf (blocks) {
+  const lo = { x: Infinity, y: Infinity, z: Infinity }
+  const hi = { x: -Infinity, y: -Infinity, z: -Infinity }
+  for (const b of blocks) {
+    lo.x = Math.min(lo.x, b.pos.x); hi.x = Math.max(hi.x, b.pos.x)
+    lo.y = Math.min(lo.y, b.pos.y); hi.y = Math.max(hi.y, b.pos.y)
+    lo.z = Math.min(lo.z, b.pos.z); hi.z = Math.max(hi.z, b.pos.z)
+  }
+  if (!Number.isFinite(lo.x)) return { width: 1, depth: 1, height: 1, lo: { x: 0, y: 0, z: 0 } }
+  return {
+    width: hi.x - lo.x + 1,
+    depth: hi.z - lo.z + 1,
+    height: hi.y - lo.y + 1,
+    lo
+  }
+}
+
 module.exports = {
+  findSite,
+  footprintOf,
+  siteIsClear,
   buildStructure,
   sweepScaffolding,
   describePlan,

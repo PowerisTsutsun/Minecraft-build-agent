@@ -447,11 +447,13 @@ function phasedActions (plan, macroPalette) {
   // macro output exactly like anything else, and none of them has to know that
   // macros exist.
   const out = []
+  let macroSeq = 0
   for (const { action, phase } of raw) {
     if (!action || !macros.isMacro(action.op)) {
       out.push({ action, phase })
       continue
     }
+    const instance = `${action.op}#${macroSeq++}`
     let parts
     try {
       parts = macros.expand(action, macroPalette)
@@ -461,9 +463,9 @@ function phasedActions (plan, macroPalette) {
     }
     // Tag the provenance so the lint can tell the model's own actions from
     // ones it has no way to change.
-    for (const sub of parts.shell) out.push({ action: { ...sub, __macro: action.op }, phase: 'shell' })
-    for (const sub of parts.carves) out.push({ action: { ...sub, __macro: action.op }, phase: 'carves' })
-    for (const sub of parts.details) out.push({ action: { ...sub, __macro: action.op }, phase: 'details' })
+    for (const sub of parts.shell) out.push({ action: { ...sub, __macro: action.op, __instance: instance }, phase: 'shell' })
+    for (const sub of parts.carves) out.push({ action: { ...sub, __macro: action.op, __instance: instance }, phase: 'carves' })
+    for (const sub of parts.details) out.push({ action: { ...sub, __macro: action.op, __instance: instance }, phase: 'details' })
   }
   return out
 }
@@ -794,6 +796,7 @@ function validatePlan (plan, isKnownBlock) {
       },
       axis: axes.includes(action.axis) ? action.axis : defaultAxis,
       ...(action.__macro ? { __macro: action.__macro } : {}),
+      ...(action.__instance ? { __instance: action.__instance } : {}),
       anchor: action.anchor === 'corner' || action.anchor === 'center'
         ? action.anchor
         : (CENTRED_BY_DEFAULT.has(action.op) ? 'center' : 'corner'),

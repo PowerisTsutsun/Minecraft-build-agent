@@ -230,7 +230,8 @@ function analyse (cells, carved) {
     overhangs,
     verticalRuns,
     openings: findOpenings(cells, carved, isSolid, isOutside),
-    floorLines: findFloorLines(solid, minY, maxY)
+    floorLines: findFloorLines(solid, minY, maxY),
+    rooms: findRooms(cells, isSolid, isOutside, minY, maxY)
   }
 }
 
@@ -319,4 +320,105 @@ function findFloorLines (solid, minY, maxY) {
   return lines
 }
 
-module.exports = { analyse, NON_SOLID, DIRS }
+// ---------------------------------------------------------------------------
+// Interiors.
+//
+// Everything else here answers questions about the outside, because that is
+// what the decorator was built to dress. The result is a building that reads
+// well from thirty blocks away and is a bare shell the moment you walk in:
+// measured on a finished keep, 43% of the interior had no light within four
+// blocks and the floor underfoot was nineteen different materials.
+//
+// A room is a connected pocket of air that is NOT outside, with a ceiling over
+// it and a floor under it. Grouping them per pocket rather than per storey
+// matters: a tower shaft and the hall beside it are different rooms with
+// different needs, and lighting them as one volume puts lanterns in the wrong
+// places.
+// ---------------------------------------------------------------------------
+const MIN_ROOM_CELLS = 12
+const MAX_ROOM_CELLS = 20000
+
+// INDOORS IS NOT "UNREACHABLE FROM OUTSIDE". The first cut used the exterior
+// flood fill and found zero rooms in a keep, because the fill walks straight in
+// through the front door - which is what a door is for. A room is a cell with a
+// ceiling over it and walls around it, whether or not you can walk to it.
+const CEILING_WITHIN = 7
+const WALL_WITHIN = 10
+
+function findRooms (cells, isSolid, isOutside, minY, maxY) {
+  const hasCeiling = p => {
+    for (let d = 1; d <= CEILING_WITHIN; d++) if (isSolid(p.offset(0, d, 0))) return true
+    return false
+  }
+  const wallsAround = p => {
+    let n = 0
+    for (const d of DIRS) {
+      for (let r = 1; r <= WALL_WITHIN; r++) {
+        if (isSolid(p.plus(d.v.scaled(r)))) { n++; break }
+      }
+    }
+    return n
+  }
+
+  const candidates = new Set()
+  for (const cell of cells.values()) {
+    if (baseName(cell.name) !== 'air') continue
+    const p = cell.pos
+    if (!hasCeiling(p)) continue
+    if (wallsAround(p) < 4) continue
+    candidates.add(key(p.x, p.y, p.z))
+  }
+
+  const seen = new Set()
+  const rooms = []
+  const steps = [[1, 0, 0], [-1, 0, 0], [0, 1, 0], [0, -1, 0], [0, 0, 1], [0, 0, -1]]
+
+  for (const start of candidates) {
+    if (seen.has(start)) continue
+    const queue = [start]
+    const group = []
+    seen.add(start)
+
+    while (queue.length && group.length < MAX_ROOM_CELLS) {
+      const k = queue.pop()
+      group.push(k)
+      const [x, y, z] = k.split(',').map(Number)
+      for (const [dx, dy, dz] of steps) {
+        const nk = key(x + dx, y + dy, z + dz)
+        if (candidates.has(nk) && !seen.has(nk)) { seen.add(nk); queue.push(nk) }
+      }
+    }
+    if (group.length < MIN_ROOM_CELLS) continue
+
+    const pts = group.map(k => k.split(',').map(Number))
+    const lo = { x: Math.min(...pts.map(p => p[0])), y: Math.min(...pts.map(p => p[1])), z: Math.min(...pts.map(p => p[2])) }
+    const hi = { x: Math.max(...pts.map(p => p[0])), y: Math.max(...pts.map(p => p[1])), z: Math.max(...pts.map(p => p[2])) }
+
+    // The floor of a room is the lowest course of air with something solid
+    // under it - which is where a player actually stands.
+    const floorCells = []
+    const ceilingCells = []
+    for (const [x, y, z] of pts) {
+      const below = new Vec3(x, y - 1, z)
+      const above = new Vec3(x, y + 1, z)
+      if (isSolid(below)) floorCells.push({ x, y, z })
+      if (isSolid(above)) ceilingCells.push({ x, y, z })
+    }
+
+    rooms.push({
+      cells: group,
+      lo,
+      hi,
+      size: group.length,
+      width: hi.x - lo.x + 1,
+      depth: hi.z - lo.z + 1,
+      height: hi.y - lo.y + 1,
+      floor: floorCells,
+      ceiling: ceilingCells
+    })
+  }
+
+  return rooms.sort((a, b) => b.size - a.size)
+}
+
+module.exports = { analyse, findRooms, NON_SOLID, DIRS }

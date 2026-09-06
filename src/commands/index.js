@@ -581,13 +581,26 @@ async function runBuild (bot, blocks, label, requester, buildRun, treads) {
   // directly: after a restart mid-build, the bot's saved position can be
   // standing on top of whatever it half-built last time rather than the true
   // floor, which silently replans the whole structure at the wrong height.
+  // Only an INTERRUPTED build resumes where it was; a finished one must not, or
+  // every later build lands inside the last. The saved origin also has to still
+  // be near the player, or a resume drags the build back across the map.
   let origin = session.loadOrigin()
   if (origin && commander.nearEnough(origin, here)) {
-    say(bot, 'Resuming at the previous build spot.')
+    say(bot, 'Resuming the build I was interrupted on.')
   } else {
-    if (origin) say(bot, 'Old build spot is far from here - starting fresh where you are.')
-    const floored = here.floored()
-    origin = new Vec3(floored.x + 2, placer.findGroundY(bot, here), floored.z)
+    // Find ground that is not already built on. The old behaviour - player
+    // position plus two - meant building twice from one spot put the second
+    // build inside the first.
+    const footprint = placer.footprintOf(blocks)
+    const site = placer.findSite(bot, here, footprint)
+    origin = site.origin.offset(-footprint.lo.x, -footprint.lo.y, -footprint.lo.z)
+
+    if (site.ring === -1) {
+      say(bot, `Couldn't find ${footprint.width}x${footprint.depth} of clear ground nearby - building beside you anyway, it may overlap something.`)
+    } else if (site.ring > 0) {
+      const dist = site.ring * 4 + 3
+      say(bot, `Nearest clear ${footprint.width}x${footprint.depth} spot is about ${dist} blocks away - building there.`)
+    }
     session.saveOrigin(origin)
   }
   state.lastOrigin = origin

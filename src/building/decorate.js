@@ -61,6 +61,7 @@ function paletteFor (decor, isKnownBlock) {
     slab: familyVariant(trim, 'slab', isKnownBlock),
     // Filled in from the plan's palette when there is one, so the gradient
     // habit uses the same blocks the build is already made of.
+    rail: decor.rail || familyVariant(trim, 'wall', isKnownBlock) || 'cobblestone_wall',
     wallBase: decor.wallBase || null,
     baseRough: decor.baseRough || null,
     upper: decor.upper || null
@@ -97,7 +98,15 @@ function decorate (cells, carved, decor, isKnownBlock) {
     }
     out.push({ pos, name })
   }
-  const occupied = p => cells.has(`${p.x},${p.y},${p.z}`)
+  // "Occupied" has to mean there is a BLOCK here, not that the cell map has an
+  // entry. Air is stored in the map like anything else, so the naive version
+  // treated every carved cell as taken - which is why the interior habits found
+  // nowhere to put anything, and why exterior habits only ever worked in the
+  // empty space outside the build.
+  const occupied = p => {
+    const c = cells.get(`${p.x},${p.y},${p.z}`)
+    return Boolean(c) && baseName(c.name) !== 'air'
+  }
 
   if (!skip.has('corbel_edges') && palette.stairs) {
     applied.corbel_edges = corbelEdges(view, palette, emit, occupied)
@@ -119,6 +128,12 @@ function decorate (cells, carved, decor, isKnownBlock) {
   }
   if (!skip.has('material_gradient') && decor.gradient !== false) {
     applied.material_gradient = materialGradient(view, palette, emit, occupied, decor)
+  }
+  if (!skip.has('interior_lights')) {
+    applied.interior_lights = interiorLights(view, palette, emit, occupied, decor)
+  }
+  if (!skip.has('stair_rails')) {
+    applied.stair_rails = stairRails(view, palette, emit, occupied)
   }
 
   // Style habits, on top of the universal ones.
@@ -400,6 +415,106 @@ function materialGradient (view, palette, emit, occupied, decor) {
 }
 
 
+
+
+// ---------------------------------------------------------------------------
+// Interior habits.
+//
+// Every habit above this line reads exteriorFaces, which means the decorator
+// was structurally incapable of seeing inside a building. Measured on a
+// finished keep: 43% of the interior had no light within four blocks, and the
+// only thing indoors was whatever the detailer happened to place.
+//
+// A building that reads well from thirty blocks away and is a bare cave when
+// you walk in is worse than one that looks plainer from outside, because the
+// inside is where someone actually spends time.
+// ---------------------------------------------------------------------------
+
+// A light every few blocks in every room, hung from the ceiling where there is
+// one and bracketed to a wall where there is not.
+function interiorLights (view, palette, emit, occupied, decor) {
+  const intensity = Number.isFinite(decor.intensity) ? decor.intensity : 0.7
+  const spacing = Math.max(3, Math.round(8 - 4 * intensity))
+  let n = 0
+
+  // Greedy spacing, not a modulo grid on world coordinates. The grid version
+  // depended on where the build happened to sit and lit one cell in a whole
+  // keep; walking the candidates and skipping anything near an existing light
+  // gives the same density wherever the build is.
+  // Horizontal distance only. Using 3-D distance meant a lantern on the ceiling
+  // blocked a wall torch on the floor below it, which is the one place you most
+  // want a second light - and the keep came out 36% lit.
+  const far = (pos, placed) => placed.every(q =>
+    Math.abs(q.x - pos.x) + Math.abs(q.z - pos.z) >= spacing ||
+    Math.abs(q.y - pos.y) >= 4)
+
+  for (const room of view.rooms) {
+    if (room.size < 16) continue
+    const placed = []
+
+    // Hanging from the ceiling is the best-looking option, so try it first.
+    for (const cell of room.ceiling) {
+      const pos = new Vec3(cell.x, cell.y, cell.z)
+      if (occupied(pos) || !far(pos, placed)) continue
+      if (!view.isSolid(pos.offset(0, 1, 0))) continue
+      emit(pos, 'lantern[hanging=true]')
+      placed.push(pos)
+      n++
+    }
+
+    // Then brackets on the walls, at head height above the floor, for anywhere
+    // the ceiling lanterns did not reach.
+    for (const cell of room.floor) {
+      const pos = new Vec3(cell.x, cell.y + 2, cell.z)
+      if (occupied(pos) || !far(pos, placed)) continue
+      const support = [[1, 0], [-1, 0], [0, 1], [0, -1]].some(([dx, dz]) => view.isSolid(pos.offset(dx, 0, dz)))
+      if (!support) continue
+      emit(pos, 'wall_torch')
+      placed.push(pos)
+      n++
+    }
+
+    // A shaft with neither - light the floor so it is not pitch black.
+    if (!placed.length && room.floor.length > 6) {
+      const middle = room.floor[Math.floor(room.floor.length / 2)]
+      const pos = new Vec3(middle.x, middle.y, middle.z)
+      if (!occupied(pos)) { emit(pos, 'lantern[hanging=false]'); n++ }
+    }
+  }
+  return n
+}
+
+// A railing round the hole a staircase punches through a floor. Without it an
+// upper storey is a room with an uncovered pit in it, which is both unsafe and
+// the clearest sign nobody finished the inside.
+function stairRails (view, palette, emit, occupied) {
+  const rail = palette.rail
+  if (!rail) return 0
+  let n = 0
+
+  // A floor cell whose neighbour at the same level is open air over a drop is
+  // the edge of a stairwell.
+  for (const room of view.rooms) {
+    for (const cell of room.floor) {
+      const here = new Vec3(cell.x, cell.y, cell.z)
+      for (const [dx, dz] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const beside = here.offset(dx, 0, dz)
+        // Open beside, and open below that - a hole, not a doorway.
+        if (view.isSolid(beside) || view.isSolid(beside.offset(0, -1, 0))) continue
+        if (!view.isSolid(here.offset(0, -1, 0))) continue
+        if (occupied(here)) continue
+        // Do not rail off a staircase's own arrival: if there is a stair below
+        // the gap, this is where someone steps out.
+        const below = view.cells.get(`${beside.x},${beside.y - 1},${beside.z}`)
+        if (below && /_stairs/.test(below.name)) continue
+        emit(here, rail)
+        n++
+        break
+      }
+    }
+  }
+  return n
+}
 
 // ---------------------------------------------------------------------------
 // Style habits. Each is (surfaces, palette, emit, occupied, decor, style) -> count.
