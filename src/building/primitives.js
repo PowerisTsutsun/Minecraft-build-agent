@@ -415,67 +415,123 @@ function ringPath (r) {
   return path.map(({ dx, dz }) => ({ dx, dz }))
 }
 
-// A helical staircase winding up the inside of a tower: ONE cell per level,
-// one orthogonal step and one block of rise between consecutive treads.
+// A helical staircase winding up the inside of a tower.
 //
-// Two rewrites got here. The first sampled an angle per level and emitted a
-// radial run - at radius 3 that advances 18.9 degrees per level, so rounding
-// put consecutive treads on THE SAME CELLS: stairs stacked on top of each
-// other, no headroom, unclimbable. The second walked the ring but kept L-shaped
-// treads, which fixed the geometry and left the orientation incoherent, because
-// the block you actually step up onto is the bridging cell, not the ring cell.
+// Built around three things a bare helix does not have: a central column to
+// wind about, treads wide enough to be a stair rather than a tightrope, and a
+// railing on the open side.
 //
-// Walking a path of single cells makes all of it fall out: every tread is a
-// distinct cell, the cell above any tread is a different path position (so
-// headroom is free), every step is orthogonal, and each tread has exactly one
-// arrival direction to face.
+// THE OUTER CELL STILL WALKS A RING, ONE PER LEVEL. That is not decoration of
+// the algorithm, it is what makes the stair climbable, and it survived two
+// rewrites to get here. Sampling an angle per level and emitting a radial run
+// puts consecutive treads on the SAME cells at radius 3 - stairs stacked on
+// each other, no headroom, unclimbable. So the outer cell comes from the ring
+// path (distinct by construction, orthogonal steps, one arrival direction to
+// face) and the wedge is filled inward from it.
 //
-// facing is the direction of ASCENT - the raised half is on the facing side.
-// Measured, not assumed; see test/stair-facing-probe.js.
-function spiral ({ radius, height, material, clearance = true, y = 0 }) {
+// Inner wedge cells are dropped where they would land on the two levels below,
+// because that is exactly the stacking the ring path exists to prevent - a
+// wide tread is worth having, but not at the cost of headroom.
+//
+// `isFree` lets the renderer answer "is there a wall here already", which the
+// railing needs and a pure function cannot know. Without it the railing is
+// placed into the tower wall it is supposed to stand clear of.
+function spiral ({
+  radius, height, material, clearance = true, y = 0,
+  railing = null, risePerTread = 1, isFree = null,
+  column = null, slab = null
+}) {
   const r = Math.max(1, Math.floor(radius))
-  const h = Math.max(1, Math.floor(height))
+  const rise = Math.max(1, Math.floor(height))
+  const half = risePerTread === 0.5
+  const steps = half ? rise * 2 : rise
   const path = ringPath(r)
   const n = path.length
   const orientable = /_stairs$/.test(baseName(material)) && !hasState(material)
+  // Family members are resolved against the server registry in validatePlan,
+  // because deriving them by string surgery here produced "stone_brick" - not a
+  // block - for the column of a stone_brick_stairs spiral.
+  // validatePlan resolves these against the server registry and always passes
+  // them; the fallbacks only apply to direct calls, and a stairs id used as a
+  // column is a visible sign that a caller skipped that resolution.
+  const stepSlab = slab || material
+  const post = column || material
+
+  // Only decorate an actual, unstated slab id with [type=...]. Appending it to
+  // whatever was passed produced oak_stairs[facing=west][type=top] and
+  // stone[type=top] - strings that are not blocks. Without a usable slab the
+  // wedge is simply solid, which is what an inner tread is anyway.
+  const usableSlab = /_slab$/.test(baseName(stepSlab)) && !hasState(stepSlab)
+  const innerName = usableSlab ? `${stepSlab}[type=top]` : post
+
+  // A column you can wind around: one cell in a narrow shaft, 2x2 once there
+  // is room for it.
+  const columnCells = r <= 3 ? [{ dx: 0, dz: 0 }] : [{ dx: 0, dz: 0 }, { dx: 1, dz: 0 }, { dx: 0, dz: 1 }, { dx: 1, dz: 1 }]
+  const inColumn = (dx, dz) => columnCells.some(c => c.dx === dx && c.dz === dz)
+
   const treads = []
   const clear = []
+  const rails = []
+  const usedAt = new Map() // "dx,dz" -> [levels it is already a tread on]
 
-  for (let level = 0; level < h; level++) {
-    const cell = path[level % n]
-    const prev = path[(level % n - 1 + n) % n]
-
-    let name = material
-    if (orientable) {
-      const dx = cell.dx - prev.dx
-      const dz = cell.dz - prev.dz
-      const facing = dx !== 0 ? (dx > 0 ? 'east' : 'west') : (dz > 0 ? 'south' : 'north')
-      name = withState(material, `facing=${facing},half=bottom`)
-    }
-
-    treads.push({ pos: new Vec3(cell.dx + r, y + level, cell.dz + r), name })
-
-    // A staircase owns the two blocks above every tread. Without this the
-    // stairs are perfect and the tower is still unclimbable: a plan that lays a
-    // solid floor disc across the shaft leaves that floor sitting directly on
-    // top of the treads, so a climber's feet are inside it and the ascent stops
-    // dead at every storey. The stairs cannot know where the floors will be, so
-    // they carve their own passage and punch a person-sized hole through
-    // whatever they pass through - which is also how the climb gets OUT onto an
-    // upper floor instead of dead-ending under it.
-    //
-    // Safe because of the invariants above: no tread sits directly on another,
-    // and none sits two levels under another, so this air never lands on a
-    // tread. Treads are emitted after the clearance regardless, so they win.
-    if (clearance) {
-      clear.push({ pos: new Vec3(cell.dx + r, y + level + 1, cell.dz + r), name: 'air' })
-      clear.push({ pos: new Vec3(cell.dx + r, y + level + 2, cell.dz + r), name: 'air' })
+  const columnTop = half ? Math.ceil(steps / 2) : steps
+  for (let level = 0; level < columnTop; level++) {
+    for (const c of columnCells) {
+      treads.push({ pos: new Vec3(c.dx + r, y + level, c.dz + r), name: post })
     }
   }
 
-  return clear.concat(treads)
-}
+  for (let step = 0; step < steps; step++) {
+    const level = half ? Math.floor(step / 2) : step
+    const cell = path[step % n]
+    const prev = path[(step % n - 1 + n) % n]
+    const dx = cell.dx - prev.dx
+    const dz = cell.dz - prev.dz
+    const facing = dx !== 0 ? (dx > 0 ? 'east' : 'west') : (dz > 0 ? 'south' : 'north')
 
+    // The outer cell is the step you actually climb.
+    const outerName = half && usableSlab
+      ? `${stepSlab}[type=${step % 2 === 0 ? 'bottom' : 'top'}]`
+      : (orientable ? withState(material, `facing=${facing},half=bottom`) : material)
+    const wedge = [{ dx: cell.dx, dz: cell.dz, name: outerName }]
+
+    // Fill inward toward the column, skipping anything that would stack.
+    const stepsIn = Math.max(Math.abs(cell.dx), Math.abs(cell.dz))
+    for (let t = 1; t < stepsIn; t++) {
+      const f = t / stepsIn
+      const ix = Math.round(cell.dx * (1 - f))
+      const iz = Math.round(cell.dz * (1 - f))
+      if (inColumn(ix, iz)) continue
+      if (wedge.some(w => w.dx === ix && w.dz === iz)) continue
+      const seen = usedAt.get(`${ix},${iz}`) || []
+      if (seen.some(l => l >= level - 2 && l < level)) continue
+      wedge.push({ dx: ix, dz: iz, name: innerName })
+    }
+
+    for (const w of wedge) {
+      treads.push({ pos: new Vec3(w.dx + r, y + level, w.dz + r), name: w.name })
+      const seen = usedAt.get(`${w.dx},${w.dz}`) || []
+      seen.push(level)
+      usedAt.set(`${w.dx},${w.dz}`, seen)
+      if (clearance) {
+        for (let h = 1; h <= 3; h++) {
+          clear.push({ pos: new Vec3(w.dx + r, y + level + h, w.dz + r), name: 'air' })
+        }
+      }
+    }
+
+    // A railing on the open side, where there is not already a wall there.
+    if (railing) {
+      const outward = { dx: Math.sign(cell.dx), dz: Math.sign(cell.dz) }
+      const rx = cell.dx + outward.dx
+      const rz = cell.dz + outward.dz
+      const pos = new Vec3(rx + r, y + level + 1, rz + r)
+      if (!isFree || isFree(pos)) rails.push({ pos, name: railing })
+    }
+  }
+
+  return clear.concat(treads, rails)
+}
 
 // ---------------------------------------------------------------------------
 // A straight flight of stairs that looks built.

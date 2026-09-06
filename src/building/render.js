@@ -82,7 +82,7 @@ function anchorShift (action) {
   return { x: -Math.floor((w - 1) / 2), z: -Math.floor((d - 1) / 2) }
 }
 
-function shapeFor (action, primitives) {
+function shapeFor (action, primitives, ctx) {
   switch (action.op) {
     case 'floor': return primitives.floor({ width: action.width, depth: action.depth, material: action.material })
     case 'wall': return primitives.wall({ length: action.length, height: action.height, material: action.material, axis: action.axis })
@@ -101,7 +101,16 @@ function shapeFor (action, primitives) {
     case 'pyramid': return primitives.pyramid({ width: action.width, depth: action.depth, height: action.height, material: action.material, hollow: action.hollow })
     case 'gable': return primitives.gable({ width: action.width, depth: action.depth, material: action.material, axis: action.axis })
     case 'arch': return primitives.arch({ width: action.width, height: action.height, depth: action.depth, material: action.material, axis: action.axis })
-    case 'spiral': return primitives.spiral({ radius: action.radius, height: action.height, material: action.material })
+    case 'spiral': return primitives.spiral({
+      radius: action.radius,
+      height: action.height,
+      material: action.material,
+      column: action.column,
+      slab: action.slab,
+      railing: action.railing,
+      risePerTread: action.risePerTread,
+      isFree: ctx && ctx.isFree
+    })
     case 'stairs': return primitives.stairs({
       axis: action.axis,
       ascent: action.ascent,
@@ -179,7 +188,16 @@ function renderPlan (plan, primitives, opts = {}) {
   const placed = (action, i) => {
     const shift = anchorShift(action)
     const off = new Vec3(action.offset.x + shift.x, action.offset.y, action.offset.z + shift.z)
-    return shapeFor(action, primitives).map(b => ({ pos: b.pos.plus(off), name: b.name }))
+    // A railing must not be built into the wall it stands against, and only
+    // the renderer knows what is already there.
+    const ctx = {
+      isFree: local => {
+        const world = local.plus(off)
+        const c = cells.get(key(world.x, world.y, world.z))
+        return !c || baseName(c.name) === 'air'
+      }
+    }
+    return shapeFor(action, primitives, ctx).map(b => ({ pos: b.pos.plus(off), name: b.name }))
   }
 
   // shell and carves, then the decorator, then the model's own details.

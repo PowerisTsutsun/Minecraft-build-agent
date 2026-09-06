@@ -212,5 +212,58 @@ check('protection: a solid wall still cannot re-seal a doorway',
   resealed.blocks.filter(b => b.pos.x === 2 && b.pos.z === 0 && b.pos.y >= 1 && b.pos.y <= 2).every(b => b.name === 'air'),
   'doorway was refilled')
 
+
+
+// Every block id a plan renders must be a real block on this server.
+//
+// Three separate bugs have shipped strings that merely look like block ids:
+// "stone_brick" as a spiral column, "oak_stairs[facing=west][type=top]" from
+// appending a state to a stated material, and "stone[type=top]" from appending
+// a slab state to a full block. All three render fine, fill nothing, and are
+// reported as failed blocks with no clue why.
+const mcData = require('minecraft-data')('26.1')
+const realBlock = n => Boolean(mcData.blocksByName[n.split('[')[0]])
+
+const REAL_PLANS = [
+  ['spiral in a tower', {
+    summary: 's',
+    shell: [{ op: 'cylinder', material: 'stone_bricks', offset: { x: 8, y: 0, z: 8 }, anchor: 'center', radius: 5, height: 16, hollow: true }],
+    carves: [{ op: 'cylinder', material: 'air', offset: { x: 8, y: 1, z: 8 }, anchor: 'center', radius: 4, height: 15, hollow: false }],
+    details: [{ op: 'spiral', material: 'stone_brick_stairs', offset: { x: 8, y: 1, z: 8 }, anchor: 'center', radius: 3, height: 14, railing: 'cobblestone_wall' }]
+  }],
+  ['half-rise spiral', {
+    summary: 's',
+    shell: [{ op: 'box', material: 'deepslate_bricks', offset: { x: 0, y: 0, z: 0 }, anchor: 'corner', width: 9, depth: 9, height: 10, hollow: true }],
+    details: [{ op: 'spiral', material: 'deepslate_brick_stairs', offset: { x: 4, y: 1, z: 4 }, anchor: 'center', radius: 3, height: 8, rise_per_tread: 0.5 }]
+  }],
+  ['straight flight', {
+    summary: 's',
+    details: [{ op: 'stairs', material: 'dark_oak_planks', offset: { x: 0, y: 0, z: 0 }, axis: 'x', ascent: '+', width: 3, rise: 9, tread: 'dark_oak_planks', stringer: 'stone_bricks', lights: 'lantern' }]
+  }],
+  ['decorated hall', {
+    summary: 's',
+    decor: { style: 'medieval_stone' },
+    shell: [
+      { op: 'box', material: 'stone_bricks', offset: { x: 0, y: 0, z: 0 }, anchor: 'corner', width: 11, depth: 9, height: 8, hollow: true },
+      { op: 'gable', material: 'deepslate_tiles', offset: { x: -1, y: 8, z: -1 }, anchor: 'corner', width: 13, depth: 11, axis: 'x' }
+    ],
+    carves: [
+      { op: 'box', material: 'air', offset: { x: 1, y: 1, z: 1 }, anchor: 'corner', width: 9, depth: 7, height: 7, hollow: false },
+      { op: 'box', material: 'air', offset: { x: 5, y: 1, z: 0 }, anchor: 'corner', width: 1, depth: 1, height: 3, hollow: false }
+    ]
+  }]
+]
+
+for (const [label, raw] of REAL_PLANS) {
+  const v = validatePlan(raw, realBlock)
+  if (v.errors.length) { check(`real blocks: ${label} validates`, false, v.errors[0]); continue }
+  const out = renderPlan(v, primitives, { isKnownBlock: realBlock })
+  const bogus = [...new Set(out.blocks.map(b => b.name).filter(n => !realBlock(n)))]
+  check(`real blocks: ${label} emits only ids this server knows`, bogus.length === 0, bogus.slice(0, 3).join(' '))
+  const doubleState = out.blocks.filter(b => (b.name.match(/\[/g) || []).length > 1)
+  check(`real blocks: ${label} emits no double-stated ids`, doubleState.length === 0,
+    doubleState.slice(0, 2).map(b => b.name).join(' '))
+}
+
 console.log(failures ? `\n${failures} FAILURES` : '\nall passed')
 process.exit(failures ? 1 : 0)

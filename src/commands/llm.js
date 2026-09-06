@@ -2,7 +2,7 @@
 
 const { MAX_SIZE, MIN_SIZE, MAX_BLOCKS, MAX_ACTIONS } = require('../config')
 const style = require('./style')
-const { baseName, isValidSpec } = require('../building/blockspec')
+const { baseName, isValidSpec, familyVariant } = require('../building/blockspec')
 const render = require('../building/render')
 
 // ---------------------------------------------------------------------------
@@ -136,6 +136,9 @@ const ACTION_SCHEMA = {
     landing_every: { type: 'integer', description: 'stairs: flat landing after every N steps. Use on anything over 8.' },
     turn: { type: 'string', enum: ['none', 'left', 'right'], description: 'stairs: turn 90 degrees at each landing.' },
     flare: { type: 'integer', description: 'stairs: widen the bottom N steps by one each side. 0-2.' },
+    railing: { type: 'string', description: 'spiral: a wall or fence block for the open side. Omitted means no railing.' },
+    column: { type: 'string', description: 'spiral: the central column block. Defaults to the solid the tread is made of.' },
+    rise_per_tread: { type: 'number', enum: [0.5, 1], description: 'spiral: 0.5 gives a gentler stair of alternating slabs.' },
     stringer_pattern: {
       type: 'array',
       items: { type: 'string' },
@@ -488,6 +491,27 @@ function validatePlan (plan, isKnownBlock) {
       }
     }
 
+    let helix
+    if (action.op === 'spiral') {
+      helix = {}
+      const tread = stairsFor(action.material, isKnownBlock)
+      if (!tread) {
+        errors.push(`${where}: "${action.material}" is not a stairs block and I could not find one for it`)
+        return
+      }
+      helix.material = tread
+      helix.column = action.column || fillFor(tread, isKnownBlock)
+      helix.slab = action.slab || familyVariant(helix.column, 'slab', isKnownBlock) || helix.column
+      helix.railing = typeof action.railing === 'string' ? action.railing : null
+      helix.risePerTread = action.rise_per_tread === 0.5 ? 0.5 : 1
+      const extras = [helix.column, helix.slab, helix.railing].filter(Boolean)
+      const unknown = extras.find(m => !isKnownBlock(m))
+      if (unknown) {
+        errors.push(`${where}: "${unknown}" is not a block this server knows`)
+        return
+      }
+    }
+
     let stair
     if (action.op === 'stairs') {
       stair = {}
@@ -552,6 +576,7 @@ function validatePlan (plan, isKnownBlock) {
       hollow: action.hollow !== false,
       ...(cells ? { cells } : {}),
       ...(stair || {}),
+      ...(helix || {}),
       ...dims
     })
   })

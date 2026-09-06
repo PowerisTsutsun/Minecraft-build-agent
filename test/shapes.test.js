@@ -104,7 +104,9 @@ check('arch: extruded through the wall', new Set(arc.map(b => b.pos.x)).size ===
 
 // --- spiral ----------------------------------------------------------------
 const spiAll = primitives.spiral({ radius: 4, height: 12, material: 'stone_bricks' })
-const spi = spiAll.filter(b => b.name !== 'air')
+// The spiral now emits a central column and slab wedge cells as well as the
+// stair treads, so "everything that is not air" is no longer "the treads".
+const spi = spiAll.filter(b => b.name !== 'air' && !/_slab/.test(b.name))
 coverOk('spiral', spiAll)
 check('spiral: one tread per level, all 12 present',
   [...Array(12).keys()].every(y => spi.some(b => b.pos.y === y)))
@@ -168,16 +170,20 @@ check('spec: rejects an unclosed bracket', !spec.isValidSpec('stone['))
 check('spec: rejects a malformed pair', !spec.isValidSpec('stone[a=b,c]'))
 check('spec: rejects uppercase', !spec.isValidSpec('Stone'))
 
-const stair = primitives.spiral({ radius: 3, height: 20, material: 'stone_brick_stairs' }).filter(b => b.name !== 'air')
+// Pass the family members the way validatePlan does, or the column falls back
+// to the tread material and the "column" is a stack of unstated stairs.
+const SPIRAL_FAMILY = { column: 'stone_bricks', slab: 'stone_brick_slab' }
+const stair = primitives.spiral({ radius: 3, height: 20, material: 'stone_brick_stairs', ...SPIRAL_FAMILY })
+  .filter(b => /_stairs/.test(b.name))
 const facings = new Set(stair.map(b => /facing=(\w+)/.exec(b.name)[1]))
 check('spiral: treads are oriented, not all default north', facings.size >= 3, `facings seen: ${[...facings].join(',')}`)
 check('spiral: every tread carries half=bottom', stair.every(b => b.name.includes('half=bottom')))
 check('spiral: an explicit state is left alone',
   primitives.spiral({ radius: 2, height: 3, material: 'oak_stairs[facing=west]' })
-    .filter(b => b.name !== 'air').every(b => b.name === 'oak_stairs[facing=west]'))
+    .filter(b => /_stairs/.test(b.name)).every(b => b.name === 'oak_stairs[facing=west]'))
 check('spiral: a non-stairs material is untouched',
   primitives.spiral({ radius: 2, height: 3, material: 'stone' })
-    .filter(b => b.name !== 'air').every(b => b.name === 'stone'))
+    .filter(b => b.name !== 'air' && !/_slab/.test(b.name)).every(b => b.name === 'stone'))
 
 // The properties that decide whether this is a staircase or a sculpture. The
 // first spiral passed "has blocks at every level" and was still unclimbable:
@@ -186,8 +192,8 @@ check('spiral: a non-stairs material is untouched',
 const dirs = { north: [0, -1], south: [0, 1], east: [1, 0], west: [-1, 0] }
 
 function stairAudit (r, h) {
-  const blocks = primitives.spiral({ radius: r, height: h, material: 'stone_brick_stairs' })
-    .filter(b => b.name !== 'air') // the audit is about treads; clearance is checked separately
+  const blocks = primitives.spiral({ radius: r, height: h, material: 'stone_brick_stairs', column: 'stone_bricks', slab: 'stone_brick_slab' })
+    .filter(b => /_stairs/.test(b.name)) // the climbed cell is the stair; column and slabs are the tread's width
   const byY = levels(blocks)
   const at = y => byY.get(y) || []
   const cell = b => `${b.pos.x},${b.pos.z}`
@@ -254,10 +260,10 @@ function passageOk (cells, treadCells) {
   return blocked
 }
 
-const stairsOnly = primitives.spiral({ radius: 3, height: 24, material: 'stone_brick_stairs' })
-const treadsOnly = stairsOnly.filter(b => b.name !== 'air')
-check('spiral: carves two blocks of clearance per tread',
-  stairsOnly.filter(b => b.name === 'air').length === treadsOnly.length * 2)
+const stairsOnly = primitives.spiral({ radius: 3, height: 24, material: 'stone_brick_stairs', column: 'stone_bricks', slab: 'stone_brick_slab' })
+const treadsOnly = stairsOnly.filter(b => /_stairs/.test(b.name))
+check('spiral: carves clearance over every tread',
+  stairsOnly.filter(b => b.name === 'air').length >= treadsOnly.length * 2)
 check('spiral: clearance never lands on a tread',
   passageOk(collapse([stairsOnly]), treadsOnly) === 0)
 
