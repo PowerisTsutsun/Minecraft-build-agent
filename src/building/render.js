@@ -128,6 +128,22 @@ function shapeFor (action, primitives, ctx) {
       flare: action.flare,
       stringerPattern: action.stringerPattern
     })
+    case 'eaves': return primitives.eaves({ width: action.width, depth: action.depth, material: action.material, proud: action.proud })
+    case 'trim_band': return primitives.trimBand({ width: action.width, depth: action.depth, material: action.material, proud: action.proud })
+    case 'battlements': return primitives.battlements({ width: action.width, depth: action.depth, material: action.material, height: action.height, cap: action.cap, proud: action.proud })
+    case 'pilaster':
+    case 'buttress': return primitives.pilaster({
+      face: action.face, along: action.along, width: action.width, height: action.height,
+      material: action.material, footprint: action.footprint,
+      buttress: action.op === 'buttress', stairs: action.stairs
+    })
+    case 'plinth': return primitives.plinth({ width: action.width, depth: action.depth, material: action.material, height: action.height, grow: action.grow })
+    case 'column': return primitives.column({ height: action.height, material: action.material, axis: action.axis })
+    case 'roof': return primitives.roof({
+      kind: action.kind, width: action.width, depth: action.depth, height: action.height,
+      material: action.material, overhang: action.overhang, gableFill: action.gableFill,
+      ridge: action.ridge, radius: action.radius, axis: action.axis
+    })
     case 'window': return primitives.window({
       face: action.face, along: action.along, width: action.width, height: action.height,
       style: action.style, frame: action.frame, glass: action.glass, sill: action.sill,

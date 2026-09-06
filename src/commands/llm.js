@@ -85,7 +85,7 @@ const ACTION_SCHEMA = {
   properties: {
     op: {
       type: 'string',
-      enum: ['floor', 'wall', 'box', 'sphere', 'house', 'cylinder', 'cone', 'pyramid', 'gable', 'arch', 'stairs', 'window', 'door', 'spiral', 'blocks']
+      enum: ['floor', 'wall', 'box', 'sphere', 'house', 'cylinder', 'cone', 'pyramid', 'gable', 'arch', 'stairs', 'window', 'door', 'eaves', 'trim_band', 'battlements', 'pilaster', 'buttress', 'plinth', 'column', 'roof', 'spiral', 'blocks']
     },
     material: {
       type: 'string',
@@ -136,6 +136,13 @@ const ACTION_SCHEMA = {
     landing_every: { type: 'integer', description: 'stairs: flat landing after every N steps. Use on anything over 8.' },
     turn: { type: 'string', enum: ['none', 'left', 'right'], description: 'stairs: turn 90 degrees at each landing.' },
     flare: { type: 'integer', description: 'stairs: widen the bottom N steps by one each side. 0-2.' },
+    kind: { type: 'string', enum: ['gable', 'hip', 'cone', 'mansard', 'pagoda', 'onion'], description: 'roof only: which roof form.' },
+    overhang: { type: 'integer', description: 'roof: how far past the wall it projects. Default 1 - a flush roof looks generated.' },
+    gable_fill: { type: 'string', description: 'roof gable: the block that fills the triangular ends.' },
+    ridge: { type: 'string', description: 'roof gable: a capping course along the ridge line.' },
+    proud: { type: 'integer', description: 'eaves, trim_band, battlements: how far outside the footprint they sit.' },
+    grow: { type: 'integer', description: 'plinth: how much wider than the building, each side. Default 1.' },
+    cap: { type: 'string', description: 'battlements: a slab on top of each merlon.' },
     face: { type: 'string', enum: ['north', 'south', 'east', 'west'], description: 'window, door: which wall of the footprint it sits in.' },
     along: { type: 'integer', description: 'window, door: how far along that wall, from its lowest corner.' },
     footprint: {
@@ -206,7 +213,7 @@ const PLAN_TOOL = {
 
 // Op tables, shared by the validator and by planToBlocks so the two can never
 // drift into disagreeing about what an op needs.
-const OPS = ['floor', 'wall', 'box', 'sphere', 'house', 'cylinder', 'cone', 'pyramid', 'gable', 'arch', 'stairs', 'window', 'door', 'spiral', 'blocks']
+const OPS = ['floor', 'wall', 'box', 'sphere', 'house', 'cylinder', 'cone', 'pyramid', 'gable', 'arch', 'stairs', 'window', 'door', 'eaves', 'trim_band', 'battlements', 'pilaster', 'buttress', 'plinth', 'column', 'roof', 'spiral', 'blocks']
 
 const REQUIRED_DIMS = {
   floor: ['width', 'depth'],
@@ -222,15 +229,23 @@ const REQUIRED_DIMS = {
   stairs: ['width', 'rise'],
   window: ['width', 'height'],
   door: ['width', 'height'],
+  eaves: ['width', 'depth'],
+  trim_band: ['width', 'depth'],
+  battlements: ['width', 'depth'],
+  pilaster: ['height'],
+  buttress: ['height'],
+  plinth: ['width', 'depth'],
+  column: ['height'],
+  roof: [],
   spiral: ['radius', 'height'],
   blocks: []
 }
 
 // Dimensions an op accepts but can do without.
-const OPTIONAL_DIMS = { arch: ['depth'] }
+const OPTIONAL_DIMS = { arch: ['depth'], battlements: ['height'], plinth: ['height'], pilaster: ['width'], buttress: ['width'], roof: ['width', 'depth', 'height', 'radius'] }
 
 // Which axes each op understands. A cylinder is the only one that can stand up.
-const ALLOWED_AXES = { cylinder: ['x', 'y', 'z'], wall: ['x', 'z'], gable: ['x', 'z'], arch: ['x', 'z'], stairs: ['x', 'z'] }
+const ALLOWED_AXES = { cylinder: ['x', 'y', 'z'], column: ['x', 'y', 'z'], wall: ['x', 'z'], gable: ['x', 'z'], arch: ['x', 'z'], stairs: ['x', 'z'], roof: ['x', 'z'] }
 
 // The `blocks` escape hatch is per-block detail, not a way to smuggle a whole
 // build past the shape validator - hence a hard cap on both count and reach.
@@ -505,6 +520,65 @@ function validatePlan (plan, isKnownBlock) {
       }
     }
 
+    // The footprint-relative ornament ops. They take a face or a footprint and
+    // work out their own geometry and block states, so the only thing to
+    // validate here is that the materials exist and that anything derived from
+    // them (a stairs sibling for eaves, a slab cap) resolves.
+    let dressing
+    if (['eaves', 'trim_band', 'battlements', 'pilaster', 'buttress', 'plinth', 'column', 'roof'].includes(action.op)) {
+      dressing = {}
+      if (action.op === 'eaves') {
+        const st = stairsFor(sharedMaterial, isKnownBlock)
+        if (!st) {
+          errors.push(`${where}: eaves need a stairs block; "${sharedMaterial}" has none`)
+          return
+        }
+        dressing.material = st
+      }
+      if (action.op === 'roof') {
+        dressing.kind = ['gable', 'hip', 'cone', 'mansard', 'pagoda', 'onion'].includes(action.kind) ? action.kind : 'gable'
+        dressing.overhang = Number.isFinite(action.overhang) ? Math.max(0, Math.min(4, Math.floor(action.overhang))) : 1
+        dressing.gableFill = typeof action.gable_fill === 'string' ? action.gable_fill : null
+        dressing.ridge = typeof action.ridge === 'string' ? action.ridge : null
+        // A sloped roof wants stairs; a cone is made of full blocks.
+        if (dressing.kind !== 'cone') {
+          const st = stairsFor(sharedMaterial, isKnownBlock)
+          if (st) dressing.material = st
+        }
+        if (!dressing.gableFill && dressing.kind === 'gable') {
+          dressing.gableFill = fillFor(dressing.material || sharedMaterial, isKnownBlock)
+        }
+      }
+      if (action.op === 'battlements') {
+        dressing.cap = typeof action.cap === 'string' ? action.cap
+          : familyVariant(sharedMaterial, 'slab', isKnownBlock)
+      }
+      if (action.op === 'buttress') {
+        dressing.buttress = true
+        dressing.stairs = stairsFor(sharedMaterial, isKnownBlock)
+      }
+      if (action.op === 'pilaster' || action.op === 'buttress') {
+        dressing.face = ['north', 'south', 'east', 'west'].includes(action.face) ? action.face : 'north'
+        dressing.along = intOr(action.along, 0)
+        if (action.footprint && Number.isFinite(action.footprint.width) && Number.isFinite(action.footprint.depth)) {
+          dressing.footprint = {
+            width: Math.max(1, Math.floor(action.footprint.width)),
+            depth: Math.max(1, Math.floor(action.footprint.depth))
+          }
+        }
+      }
+      dressing.proud = Number.isFinite(action.proud) ? Math.max(0, Math.min(4, Math.floor(action.proud))) : undefined
+      dressing.grow = Number.isFinite(action.grow) ? Math.max(0, Math.min(4, Math.floor(action.grow))) : undefined
+
+      const extras = [dressing.material, dressing.gableFill, dressing.ridge, dressing.cap, dressing.stairs].filter(Boolean)
+      const unknown = extras.find(m => !isKnownBlock(m))
+      if (unknown) {
+        errors.push(`${where}: "${unknown}" is not a block this server knows`)
+        return
+      }
+      for (const k of Object.keys(dressing)) if (dressing[k] === undefined) delete dressing[k]
+    }
+
     let opening
     if (action.op === 'window' || action.op === 'door') {
       opening = {}
@@ -636,6 +710,7 @@ function validatePlan (plan, isKnownBlock) {
       ...(stair || {}),
       ...(helix || {}),
       ...(opening || {}),
+      ...(dressing || {}),
       ...dims
     })
   })

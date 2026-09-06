@@ -862,4 +862,227 @@ function door ({
 }
 
 
-module.exports = { floor, wall, box, sphere, house, cylinder, cone, pyramid, gable, arch, spiral, stairs, window, door, openingShape, outsideIn, circleLimit, ascentFacing }
+
+// ---------------------------------------------------------------------------
+// Architectural primitives.
+//
+// Everything here works from a FOOTPRINT - a width by depth rectangle, or a
+// radius for the round forms - and computes its own block states. The model
+// says "eaves around this building at this height"; it never writes a facing.
+//
+// These exist because the model spent most of its actions, and made most of its
+// mistakes, hand-placing exactly these things out of `blocks` cells.
+// ---------------------------------------------------------------------------
+
+// The perimeter cells of a footprint, each with the direction that faces out.
+function perimeter (width, depth, { grow = 0 } = {}) {
+  const w = Math.max(1, Math.floor(width))
+  const d = Math.max(1, Math.floor(depth))
+  const lo = -grow
+  const hiX = w - 1 + grow
+  const hiZ = d - 1 + grow
+  const out = []
+  for (let x = lo; x <= hiX; x++) {
+    for (let z = lo; z <= hiZ; z++) {
+      const edgeX = x === lo || x === hiX
+      const edgeZ = z === lo || z === hiZ
+      if (!edgeX && !edgeZ) continue
+      const normals = []
+      if (x === lo) normals.push('west')
+      if (x === hiX) normals.push('east')
+      if (z === lo) normals.push('north')
+      if (z === hiZ) normals.push('south')
+      out.push({ x, z, normals, corner: edgeX && edgeZ })
+    }
+  }
+  return out
+}
+
+const OUTWARD = { north: new Vec3(0, 0, -1), south: new Vec3(0, 0, 1), east: new Vec3(1, 0, 0), west: new Vec3(-1, 0, 0) }
+
+// A cornice: upside-down stairs one block proud of the footprint, facing out.
+// Corners get a stair on the diagonal too, or the ring has a notch in it.
+function eaves ({ width, depth, material, y = 0, proud = 1 }) {
+  const blocks = []
+  for (const cell of perimeter(width, depth, { grow: proud })) {
+    for (const dir of cell.normals) {
+      const at = new Vec3(cell.x, y, cell.z)
+      blocks.push({ pos: at, name: orientStairs(material, OUTWARD[dir].x, OUTWARD[dir].z, 'top') })
+      break
+    }
+  }
+  return blocks
+}
+
+// One course of contrasting stone around a footprint.
+function trimBand ({ width, depth, material, y = 0, proud = 0 }) {
+  return perimeter(width, depth, { grow: proud })
+    .map(cell => ({ pos: new Vec3(cell.x, y, cell.z), name: material }))
+}
+
+// Merlons on alternating cells, with an optional walkway course below them.
+function battlements ({ width, depth, material, y = 0, height = 2, cap = null, proud = 0 }) {
+  const blocks = []
+  const h = Math.max(1, Math.floor(height))
+  for (const cell of perimeter(width, depth, { grow: proud })) {
+    // Alternate around the ring; corners always get a merlon so the silhouette
+    // reads as crenellated rather than accidentally gapped.
+    const solid = cell.corner || ((cell.x + cell.z) % 2 === 0)
+    if (!solid) continue
+    for (let level = 0; level < h; level++) {
+      blocks.push({ pos: new Vec3(cell.x, y + level, cell.z), name: material })
+    }
+    if (cap) blocks.push({ pos: new Vec3(cell.x, y + h, cell.z), name: cap })
+  }
+  return blocks
+}
+
+// A column standing proud of one face, stepping back with stairs near the top.
+function pilaster ({ face = 'north', along = 0, width = 1, height = 6, material, footprint = null, y = 0, buttress = false, stairs = null }) {
+  const w = Math.max(1, Math.floor(width))
+  const h = Math.max(1, Math.floor(height))
+  const { start, f } = openingCorner({ face, along, y, footprint })
+  const out = new Vec3(OUTWARD[face].x, 0, OUTWARD[face].z)
+  const blocks = []
+
+  // A buttress leans in as it rises; a pilaster is a straight strip.
+  const stepAt = buttress ? Math.max(1, Math.floor(h * 0.6)) : h
+
+  for (let level = 0; level < h; level++) {
+    const depth = buttress && level >= stepAt ? 0 : 1
+    for (let a = 0; a < w; a++) {
+      const base = f.along === 'x' ? start.offset(a, level, 0) : start.offset(0, level, a)
+      for (let t = 1; t <= Math.max(1, depth); t++) {
+        blocks.push({ pos: base.plus(out.scaled(t)), name: material })
+      }
+    }
+  }
+
+  // The set-back is dressed with stairs so the step reads as deliberate.
+  if (buttress && stairs) {
+    for (let a = 0; a < w; a++) {
+      const base = f.along === 'x' ? start.offset(a, stepAt, 0) : start.offset(0, stepAt, a)
+      blocks.push({ pos: base.plus(out.scaled(2)), name: orientStairs(stairs, -out.x, -out.z, 'bottom') })
+    }
+  }
+  return blocks
+}
+
+// A base course wider than the building it carries.
+function plinth ({ width, depth, material, height = 1, grow = 1, y = 0, depthBelow = 0 }) {
+  const blocks = []
+  const h = Math.max(1, Math.floor(height))
+  const w = Math.max(1, Math.floor(width)) + grow * 2
+  const d = Math.max(1, Math.floor(depth)) + grow * 2
+  for (let level = -Math.max(0, Math.floor(depthBelow)); level < h; level++) {
+    for (let x = 0; x < w; x++) {
+      for (let z = 0; z < d; z++) {
+        blocks.push({ pos: new Vec3(x - grow, y + level, z - grow), name: material })
+      }
+    }
+  }
+  return blocks
+}
+
+// A pillar. Logs get their axis set from the direction they run.
+function column ({ height = 4, material, axis = 'y', y = 0 }) {
+  const h = Math.max(1, Math.floor(height))
+  const name = /_log$|_stem$|_wood$/.test(baseName(material)) && !hasState(material)
+    ? withState(material, `axis=${axis}`)
+    : material
+  const blocks = []
+  for (let i = 0; i < h; i++) {
+    const pos = axis === 'x' ? new Vec3(i, y, 0) : axis === 'z' ? new Vec3(0, y, i) : new Vec3(0, y + i, 0)
+    blocks.push({ pos, name })
+  }
+  return blocks
+}
+
+// ---------------------------------------------------------------------------
+// One roof op for every roof shape.
+//
+// gable and hip are the rectangular pair; cone is the round one; mansard,
+// pagoda and onion are the stacked forms. All of them overhang by default,
+// because a roof flush with its walls is the single clearest sign that
+// something was generated rather than built.
+// ---------------------------------------------------------------------------
+function roof ({
+  kind = 'gable', width = 9, depth = 9, height = null, material,
+  overhang = 1, gableFill = null, ridge = null, radius = null, axis = 'x', y = 0
+}) {
+  const over = Math.max(0, Math.floor(overhang))
+  const w = Math.max(1, Math.floor(width)) + over * 2
+  const d = Math.max(1, Math.floor(depth)) + over * 2
+  const shift = -over
+  const blocks = []
+  const at = (list) => list.map(b => ({ pos: b.pos.offset(shift, 0, shift), name: b.name }))
+
+  if (kind === 'cone') {
+    const r = radius !== null ? Math.floor(radius) + over : Math.floor(Math.max(w, d) / 2)
+    const h = height !== null ? Math.floor(height) : r * 2
+    return cone({ radius: r, height: h, material, hollow: true, y })
+      .map(b => ({ pos: b.pos.offset(-over, 0, -over), name: b.name }))
+  }
+
+  if (kind === 'hip') {
+    const h = height !== null ? Math.floor(height) : Math.ceil(Math.min(w, d) / 2)
+    return at(pyramid({ width: w, depth: d, height: h, material, hollow: true, y }))
+  }
+
+  if (kind === 'mansard' || kind === 'pagoda' || kind === 'onion') {
+    // Stacked tiers: each narrower than the last, with its own eaves flare.
+    const tiers = kind === 'pagoda' ? 3 : 2
+    const perTier = height !== null ? Math.max(1, Math.floor(height / tiers)) : 3
+    let tw = w
+    let td = d
+    let level = y
+    for (let t = 0; t < tiers; t++) {
+      const steep = kind === 'mansard' ? t === 0 : true
+      const tierHeight = steep ? perTier : Math.max(1, Math.ceil(perTier / 2))
+      blocks.push(...at(pyramid({ width: tw, depth: td, height: tierHeight, material, hollow: true, y: level })))
+      if (kind === 'pagoda' && t < tiers - 1) {
+        // The flared eaves that make a pagoda a pagoda.
+        blocks.push(...at(eaves({ width: tw, depth: td, material, y: level, proud: 1 })))
+      }
+      level += tierHeight
+      tw = Math.max(1, tw - 2)
+      td = Math.max(1, td - 2)
+    }
+    return blocks
+  }
+
+  // gable
+  const h = height !== null ? Math.floor(height) : Math.ceil((axis === 'z' ? w : d) / 2)
+  const slopes = at(gable({ width: w, depth: d, material, axis, y }))
+  blocks.push(...slopes)
+
+  // Fill the triangular ends, or the roof is two flying planes.
+  if (gableFill) {
+    const span = axis === 'z' ? w : d
+    const run = axis === 'z' ? d : w
+    for (let level = 0; level * 2 < span; level++) {
+      const near = level
+      const far = span - 1 - level
+      for (const end of [0, run - 1]) {
+        for (let across = near; across <= far; across++) {
+          const pos = axis === 'z'
+            ? new Vec3(across + shift, y + level, end + shift)
+            : new Vec3(end + shift, y + level, across + shift)
+          blocks.push({ pos, name: gableFill })
+        }
+      }
+    }
+  }
+
+  if (ridge) {
+    const top = Math.max(...slopes.map(b => b.pos.y))
+    for (const b of slopes.filter(b => b.pos.y === top)) {
+      blocks.push({ pos: b.pos.offset(0, 1, 0), name: ridge })
+    }
+  }
+
+  return blocks
+}
+
+
+module.exports = { floor, wall, box, sphere, house, cylinder, cone, pyramid, gable, arch, spiral, stairs, window, door, eaves, trimBand, battlements, pilaster, plinth, column, roof, openingShape, perimeter, outsideIn, circleLimit, ascentFacing }
