@@ -170,6 +170,58 @@ function nearEnough (a, b) {
   return Boolean(a) && Boolean(b) && a.distanceTo(b) <= RESUME_RADIUS
 }
 
+
+// ---------------------------------------------------------------------------
+// Chunk residency.
+//
+// /fill does nothing at all in an unloaded chunk - measured at 300 commands
+// sent, 192 landed, no error either way. Teleporting the bot to the site covers
+// a building; it does not cover a build wider than the server's view distance,
+// which is now reachable with a 96-block size limit.
+//
+// forceload is the guarantee. It is also server state that outlives this
+// process, so it is removed in a finally AND swept at startup: a crash between
+// add and remove would otherwise pin chunks loaded forever and quietly tax the
+// server for the rest of its life.
+// ---------------------------------------------------------------------------
+const FORCELOAD_CHUNK_LIMIT = 256
+
+function boundsOf (keys) {
+  const lo = { x: Infinity, z: Infinity }
+  const hi = { x: -Infinity, z: -Infinity }
+  for (const k of keys) {
+    const [x, , z] = parseKey(k)
+    if (x < lo.x) lo.x = x
+    if (x > hi.x) hi.x = x
+    if (z < lo.z) lo.z = z
+    if (z > hi.z) hi.z = z
+  }
+  return { lo, hi }
+}
+
+async function forceloadAdd (bot, keys) {
+  if (!keys.length) return null
+  const { lo, hi } = boundsOf(keys)
+  const chunks = (Math.floor(hi.x / 16) - Math.floor(lo.x / 16) + 1) *
+    (Math.floor(hi.z / 16) - Math.floor(lo.z / 16) + 1)
+  if (chunks > FORCELOAD_CHUNK_LIMIT) {
+    console.error(`[fill] build spans ${chunks} chunks, over the ${FORCELOAD_CHUNK_LIMIT} forceload limit - relying on the teleport instead`)
+    return null
+  }
+  const region = { lo, hi }
+  bot.chat(`/forceload add ${lo.x} ${lo.z} ${hi.x} ${hi.z}`)
+  await bot.waitForTicks(CMD_SETTLE_TICKS)
+  try { await bot.waitForChunksToLoad() } catch (err) { /* best effort */ }
+  await bot.waitForTicks(CMD_SETTLE_TICKS)
+  console.log(`[fill] forceloaded ${chunks} chunk${chunks === 1 ? '' : 's'}`)
+  return region
+}
+
+function forceloadRemove (bot, region) {
+  if (!region) return
+  bot.chat(`/forceload remove ${region.lo.x} ${region.lo.z} ${region.hi.x} ${region.hi.z}`)
+}
+
 // ---------------------------------------------------------------------------
 // The fill build.
 //
@@ -217,6 +269,7 @@ async function fillStructure (bot, origin, blocks, opts = {}) {
 
   // One write at the end rather than one per 25 blocks - see session.js.
   session.setBuffering(true)
+  const region = await forceloadAdd(bot, [...todo.keys()])
 
   try {
     // ONE command first, and wait for it. If this bot is not op the fill does
@@ -262,6 +315,29 @@ async function fillStructure (bot, origin, blocks, opts = {}) {
       pending = stillWrong
     }
 
+    // One re-issue for anything still unconfirmed. A fill that did not land is
+    // usually a chunk that was not ready yet rather than a command the server
+    // refused, and the second attempt costs a handful of commands.
+    if (pending.length) {
+      console.log(`[fill] re-issuing ${pending.length} unconfirmed block${pending.length === 1 ? '' : 's'}`)
+      const retryCells = new Map(pending.map(k => [k, todo.get(k)]))
+      for (const box of toBoxes(retryCells)) bot.chat(fillCommand(box))
+      await bot.waitForTicks(CMD_SETTLE_TICKS * 2)
+
+      const stillWrong = []
+      for (const k of pending) {
+        const [x, y, z] = parseKey(k)
+        const now = bot.blockAt(new Vec3(x, y, z))
+        if (now && now.name === baseName(todo.get(k))) {
+          stats.placed++
+          session.recordPlacement(buildId, new Vec3(x, y, z), todo.get(k), previous.get(k) || 'unknown')
+        } else {
+          stillWrong.push(k)
+        }
+      }
+      pending = stillWrong
+    }
+
     for (const k of pending) {
       const [x, y, z] = parseKey(k)
       stats.failed++
@@ -272,6 +348,7 @@ async function fillStructure (bot, origin, blocks, opts = {}) {
     console.log(`[fill] ${label}: ${stats.placed} placed, ${stats.failed} failed, ${stats.skipped} already correct`)
     if (onProgress) onProgress(totalCells, totalCells)
   } finally {
+    forceloadRemove(bot, region)
     session.setBuffering(false)
     session.flush()
   }
@@ -361,4 +438,4 @@ async function restore (bot, entries, opts = {}) {
   return stats
 }
 
-module.exports = { fillStructure, restore, toBoxes, boxCells, fillCommand, teleportTo, teleportToPlayer, nearEnough }
+module.exports = { fillStructure, restore, toBoxes, boxCells, fillCommand, forceloadAdd, forceloadRemove, teleportTo, teleportToPlayer, nearEnough }

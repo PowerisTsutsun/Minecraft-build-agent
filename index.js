@@ -17,6 +17,9 @@ bot.once('spawn', () => {
   // fall damage while it stands next to (or briefly inside) what it is filling,
   // and means the walking fallback never runs its inventory dry.
   bot.chat('/gamemode creative')
+  // Sweep any forceload orphaned by a crash between add and remove; left alone
+  // they pin chunks loaded for the life of the server.
+  bot.chat('/forceload remove all')
   bot.chat('BuilderBot online. !help for commands, !make <description> for plain English.')
   console.log(`Connected to ${CONNECTION.host}:${CONNECTION.port} as ${bot.username} (${CONNECTION.version})`)
   console.log(`LLM builds ${process.env.ANTHROPIC_API_KEY ? 'enabled' : 'DISABLED - no ANTHROPIC_API_KEY set'}`)
