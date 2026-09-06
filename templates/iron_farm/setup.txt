@@ -1,0 +1,14 @@
+# Slash commands run after the template is placed, one per line.
+# ~x ~y ~z are offsets from the template's origin corner, resolved at placement.
+#
+# Blocks alone do not make an iron farm. It needs three villagers who can see a
+# zombie they cannot reach, each with a bed and a workstation they can path to.
+# Fill in the real coordinates once you have exported a farm that works.
+#
+# The zombie must not despawn and must not move: NoAI stops it wandering,
+# PersistenceRequired stops it vanishing, Silent stops it being a nuisance.
+#
+# /summon minecraft:villager ~5 ~2 ~5 {VillagerData:{profession:"minecraft:farmer",level:2},PersistenceRequired:1b}
+# /summon minecraft:villager ~5 ~2 ~7 {VillagerData:{profession:"minecraft:librarian",level:2},PersistenceRequired:1b}
+# /summon minecraft:villager ~7 ~2 ~5 {VillagerData:{profession:"minecraft:cleric",level:2},PersistenceRequired:1b}
+# /summon minecraft:zombie ~6 ~5 ~6 {NoAI:1b,Silent:1b,PersistenceRequired:1b,IsBaby:0b}

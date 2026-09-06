@@ -11,6 +11,8 @@ const style = require('./style')
 const plans = require('../plans')
 const pipeline = require('../pipeline')
 const inspector = require('../pipeline/inspector')
+const templates = require('../building/templates')
+const classify = require('../pipeline/classify')
 const { configureMovements, isKnownBlock } = require('../bot')
 const commander = require('../building/commander')
 const { SCAFFOLD_BLOCK, MAX_SIZE, MAX_BLOCKS, DEFAULTS, BUILD_MODE } = require('../config')
@@ -59,6 +61,8 @@ function register (bot) {
         case '!style': return showStyle(bot)
         case '!remember': return remember(bot, args[1])
         case '!forget': return forget(bot, args[1])
+        case '!export': return await exportTemplate(bot, args[1], username)
+        case '!template': return await template(bot, args, username)
         case '!make': return await make(bot, args.slice(1).join(' '), username)
         case '!build': return await build(bot, args, username)
       }
@@ -80,7 +84,8 @@ function say (bot, text) {
 }
 
 function help (bot) {
-  say(bot, 'Shapes: house floor wall box sphere cylinder cone pyramid gable arch spiral. Also !make <description>, !schem <name>, !dry, !undo, !stop')
+  say(bot, 'Shapes: house floor wall box sphere cylinder cone pyramid gable arch stairs spiral. Also !make <description>, !schem <name>, !dry, !undo, !stop')
+  say(bot, 'Machines: !template list | !template place <name> | !export <name> at two corners to capture one that works.')
   say(bot, 'Teach me: !remember <name> keeps the last !make as an example to build like. !style shows what I have learned. !forget <name> drops one.')
 }
 
@@ -288,6 +293,31 @@ async function make (bot, request, requester) {
 
   say(bot, 'Thinking...')
 
+  // Architectural or functional? They need opposite treatment: a keep should be
+  // invented and dressed, a farm should be placed exactly as someone proved it
+  // works. Inventing a farm produces a farm-shaped building that makes nothing,
+  // and reports success while doing it.
+  let kind = { kind: 'architectural' }
+  try {
+    kind = await classify.classify(request, llm.getClient(), llm.MODEL)
+  } catch (err) {
+    console.error('[classify] defaulting to architectural:', err.message)
+  }
+
+  if (kind.kind === 'functional') {
+    if (kind.template) {
+      say(bot, `That is a machine, and I have a "${kind.template}" template - placing it rather than inventing one.`)
+      return await placeTemplate(bot, kind.template, requester)
+    }
+    // No template. Say so plainly rather than building something that looks
+    // right and does nothing.
+    const have = templates.list()
+    say(bot, `That is a mechanism, not a building, and I have no template for it${have.length ? ` (I have: ${have.join(', ')})` : ''}.`)
+    say(bot, 'I can only invent the shape, not make it work - the redstone and mob mechanics need a proven design.')
+    say(bot, 'Build one that works, then !export <name> at two opposite corners and I will place it exactly from then on.')
+    return
+  }
+
   // One check, used both to accept a plan and to tell the model what to fix.
   // Validation and the render lint are the same gate: an invented block id and
   // a wall that buries its own doorway are both things a second attempt can
@@ -430,6 +460,95 @@ function forget (bot, name) {
   }
 }
 
+
+// ---------------------------------------------------------------------------
+// Templates. A build that has to WORK is not planned - it is placed from a
+// design someone proved, and its entities are summoned by a setup script.
+// ---------------------------------------------------------------------------
+function templateList (bot) {
+  const names = templates.list()
+  if (!names.length) {
+    return say(bot, 'No templates yet. Build something that works, stand at one corner, !export <name>, then walk to the opposite corner and !export <name> again.')
+  }
+  say(bot, `Templates: ${names.join(', ')}`)
+  for (const name of names.slice(0, 3)) {
+    const info = templates.describe(name)
+    const s = info.meta.size
+    say(bot, `  ${name}: ${s ? `${s.x}x${s.y}x${s.z}` : '?'}, ${info.setup.length} setup command${info.setup.length === 1 ? '' : 's'}`)
+  }
+}
+
+// Two calls mark the corners, which is the only way to pick a region in chat
+// without a selection tool.
+const exportCorners = new Map()
+
+async function exportTemplate (bot, name, requester) {
+  if (!name) return say(bot, 'Usage: !export <name> - call it twice, at opposite corners of the region.')
+  if (!templates.NAME.test(name)) return say(bot, 'A template name is lowercase letters, digits, - or _')
+
+  const player = bot.players[requester]
+  const at = player && player.entity ? player.entity.position.floored() : bot.entity.position.floored()
+
+  const first = exportCorners.get(name)
+  if (!first) {
+    exportCorners.set(name, at)
+    return say(bot, `Corner one of "${name}" at (${at.x}, ${at.y}, ${at.z}). Walk to the opposite corner and !export ${name} again.`)
+  }
+
+  exportCorners.delete(name)
+  say(bot, `Corner two at (${at.x}, ${at.y}, ${at.z}) - reading the region...`)
+  try {
+    const meta = await templates.exportRegion(bot, name, first, at)
+    say(bot, `Saved "${name}": ${meta.size.x}x${meta.size.y}x${meta.size.z}, ${meta.blocks} blocks.`)
+    const notable = Object.keys(meta.notable || {})
+    if (notable.length) say(bot, `Mechanism parts captured: ${notable.slice(0, 6).join(', ')}`)
+    say(bot, `Add the /summon lines to templates/${name}/setup.txt - blocks alone will not make it run.`)
+  } catch (err) {
+    say(bot, `Couldn't export: ${err.message}`)
+  }
+}
+
+async function template (bot, args, requester) {
+  const verb = args[1]
+  if (!verb || verb === 'list') return templateList(bot)
+  if (verb === 'place') return await placeTemplate(bot, args[2], requester)
+  if (verb === 'import') return say(bot, `Use !export ${args[2] || '<name>'} at two opposite corners - that is the import.`)
+  say(bot, 'Usage: !template list | !template place <name>')
+}
+
+async function placeTemplate (bot, name, requester) {
+  if (!name) return say(bot, 'Usage: !template place <name>')
+  if (state.building) return say(bot, 'Already building - say !stop first.')
+
+  let info
+  try {
+    info = await templates.load(name, bot.version)
+  } catch (err) {
+    return say(bot, `Couldn't load "${name}": ${err.message}`)
+  }
+
+  const { blocks, skipped } = templates.schematicToBlocks(info.schematic)
+  if (!blocks.length) return say(bot, `"${name}" has no blocks in it.`)
+  if (skipped) say(bot, `(${skipped} blocks in the file could not be read.)`)
+
+  say(bot, `Placing ${name}: ${blocks.length} blocks.`)
+  const origin = await runBuild(bot, blocks, `template ${name}`, requester, null)
+
+  // The blocks are only half of a working machine.
+  if (info.setup.length && state.lastOrigin) {
+    const commands = templates.setupCommands(info, state.lastOrigin)
+    say(bot, `Running ${commands.length} setup command${commands.length === 1 ? '' : 's'} - villagers, mobs, chest contents.`)
+    for (const command of commands) {
+      bot.chat(command.startsWith('/') ? command : `/${command}`)
+      await bot.waitForTicks(4)
+    }
+    say(bot, 'Setup done. Give it a few minutes before judging whether it runs.')
+  } else if (!info.setup.length) {
+    say(bot, `No setup commands for "${name}" - if it needs villagers or mobs, add them to templates/${name}/setup.txt`)
+  }
+  return origin
+}
+
 // ---------------------------------------------------------------------------
 // Shared build runner: origin, material check, dry-run, execution, reporting.
 // ---------------------------------------------------------------------------
@@ -471,6 +590,7 @@ async function runBuild (bot, blocks, label, requester, buildRun) {
     origin = new Vec3(floored.x + 2, placer.findGroundY(bot, here), floored.z)
     session.saveOrigin(origin)
   }
+  state.lastOrigin = origin
 
   if (state.dryRun) {
     const stats = await placer.buildStructure(bot, origin, blocks, { dryRun: true, label })

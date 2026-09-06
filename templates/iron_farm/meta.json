@@ -1,0 +1,7 @@
+{
+  "name": "iron_farm",
+  "scaffold": true,
+  "note": "No .schem yet - see readme.md. Placing this will fail until a working farm is exported into it.",
+  "needs": ["3 villagers", "1 zombie with NoAI", "3 beds", "3 workstations"],
+  "produces": "iron ingots at the collection chest"
+}

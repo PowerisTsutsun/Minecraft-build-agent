@@ -1,0 +1,32 @@
+{
+  "name": "roundtrip_test",
+  "size": {
+    "x": 7,
+    "y": 5,
+    "z": 7
+  },
+  "version": "26.1",
+  "exported": "2026-09-06T04:40:10.841Z",
+  "blocks": 79,
+  "protect": {
+    "from": {
+      "x": 0,
+      "y": 0,
+      "z": 0
+    },
+    "to": {
+      "x": 6,
+      "y": 4,
+      "z": 6
+    }
+  },
+  "notable": {
+    "water": 3,
+    "hopper": 1,
+    "chest": 1,
+    "red_bed": 1,
+    "magma_block": 1
+  },
+  "needs": [],
+  "produces": null
+}
