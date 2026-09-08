@@ -1,5 +1,16 @@
 node_modules/
+*.log
+
+# per-machine / secrets
+.env
+rcon-servers.json
+server/
+
+# generated at runtime
 plans/
 .build-undo.json
 .build-origin.json
-*.log
+.rcon-undo-*.json
+.datapack/
+iso-test.png
+*.bak

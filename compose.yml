@@ -1,0 +1,57 @@
+# A complete, runnable setup: one vanilla 26.2 server and the bot driving it.
+#
+#   cp .env.example .env            # set RCON_PASSWORD
+#   cp rcon-servers.example.json rcon-servers.json
+#   docker compose up -d
+#   docker compose logs -f bot      # wait for "rcon connected"
+#
+# Then join the server and type:  !build list
+#
+# Already have a server? Delete the `mc` service, point `bot`'s two read-only
+# mounts at your server's logs/ and world/ directories, and set MC_SERVER to the
+# matching entry in rcon-servers.json. The server needs enable-rcon=true.
+
+services:
+  mc:
+    image: itzg/minecraft-server:latest
+    container_name: mc
+    ports:
+      - "25565:25565"
+      - "127.0.0.1:25575:25575"     # rcon, loopback only - the bot uses host networking
+    environment:
+      EULA: "TRUE"
+      TYPE: "VANILLA"
+      VERSION: "26.2"
+      MEMORY: "2G"
+      ENABLE_RCON: "true"
+      RCON_PASSWORD: ${RCON_PASSWORD:?set RCON_PASSWORD in .env}
+      ONLINE_MODE: ${ONLINE_MODE:-true}
+      ENFORCE_SECURE_PROFILE: "false"
+    volumes:
+      - ./server/data:/data
+    restart: unless-stopped
+    stdin_open: true
+    tty: true
+
+  bot:
+    image: node:22-alpine
+    container_name: mc-builder-bot
+    network_mode: host
+    working_dir: /app
+    environment:
+      MC_SERVER: "mc"                 # which rcon-servers.json entry to drive
+      MC_MAX_BLOCKS: "500000"         # refuse anything bigger; downloaded builds run to ~370k
+      RCON_PASSWORD: ${RCON_PASSWORD}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+    volumes:
+      - ./:/app
+      # RCON can send commands but cannot receive chat, so the bot tails the
+      # server log for "<Player> !build ..." and answers with /tellraw. And no
+      # command reports what block is at a position, so reading a build means
+      # reading the world's region files. Both read-only, on purpose.
+      - ./server/data/logs:/servers/mc/logs:ro
+      - ./server/data/world:/servers/mc/world:ro
+    command: sh -c "npm install --omit=dev && npm start"
+    depends_on:
+      - mc
+    restart: unless-stopped

@@ -1,0 +1,10 @@
+{
+  "_comment": "Copy to rcon-servers.json and edit. One entry per server the bot may drive. `password` may be ${ENV_VAR}. `log` and the world dir are the paths INSIDE the bot container - see compose.yml for the mounts. `readVersion` is the minecraft-data registry used to read schematics (see src/version.js).",
+  "mc": {
+    "host": "127.0.0.1",
+    "port": 25575,
+    "password": "${RCON_PASSWORD}",
+    "log": "/servers/mc/logs/latest.log",
+    "readVersion": "26.1"
+  }
+}
