@@ -14,3 +14,7 @@ plans/
 .datapack/
 iso-test.png
 *.bak
+
+# agent scratch / assistant tooling - never committed
+.agent-audit/
+.claude/
