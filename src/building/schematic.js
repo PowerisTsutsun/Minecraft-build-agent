@@ -1,6 +1,7 @@
 'use strict'
 
 const fs = require('fs').promises
+const fsSync = require('fs')
 const path = require('path')
 const { Vec3 } = require('vec3')
 const { specOf } = require('./blockspec')
@@ -18,9 +19,9 @@ const { outsideIn } = require('./primitives')
 //   - Schematics store an arbitrary origin (often negative). We rebase every
 //     block against the schematic's own minimum corner so the result is
 //     non-negative and origin-anchored, matching the primitives' contract.
-//   - Block *states* are flattened to plain block names. A schematic's stairs
-//     know which way they face; mineflayer's placeBlock does not let us
-//     control that, so orientation is lost. Better to say so than to pretend.
+//   - Block *states* are carried through as full specs (specOf), so a
+//     schematic's stairs keep the way they face. The walking placer cannot
+//     honour that, but the command/fill path can, and that is the live one.
 // ---------------------------------------------------------------------------
 
 const SCHEMATIC_DIR = process.env.MC_SCHEMATIC_DIR || path.join(__dirname, '..', '..', 'schematics')
@@ -28,7 +29,7 @@ const SCHEMATIC_DIR = process.env.MC_SCHEMATIC_DIR || path.join(__dirname, '..',
 async function listSchematics () {
   try {
     const files = await fs.readdir(SCHEMATIC_DIR)
-    return files.filter(f => /\.(schem|schematic)$/i.test(f))
+    return files.filter(f => /\.(schem|schematic|litematic)$/i.test(f))
   } catch (err) {
     return []
   }
@@ -38,14 +39,32 @@ function resolveSchematicPath (name) {
   // Names come from chat, so keep them inside the schematics dir - no
   // ../../etc/passwd, no absolute paths.
   const safe = path.basename(name)
-  const withExt = /\.(schem|schematic)$/i.test(safe) ? safe : `${safe}.schem`
-  return path.join(SCHEMATIC_DIR, withExt)
+  if (/\.(schem|schematic|litematic)$/i.test(safe)) return path.join(SCHEMATIC_DIR, safe)
+  // Bare name: prefer .schem, then .schematic, then .litematic.
+  for (const ext of ['schem', 'schematic', 'litematic']) {
+    const candidate = path.join(SCHEMATIC_DIR, `${safe}.${ext}`)
+    if (fsSync.existsSync(candidate)) return candidate
+  }
+  return path.join(SCHEMATIC_DIR, `${safe}.schem`)
 }
 
 async function loadSchematic (name, version) {
-  const { Schematic } = require('prismarine-schematic')
   const file = resolveSchematicPath(name)
   const buffer = await fs.readFile(file)
+  if (/\.litematic$/i.test(file)) {
+    // Litematica's own format - see litematic.js. Same Schematic object out.
+    return require('./litematic').read(buffer, version)
+  }
+  // Sponge v3 has to be intercepted before prismarine-schematic sees it: its
+  // reader only knows v1/v2 and fails with an error that looks like corruption.
+  // See sponge3.js - v3 is a field rename, not a new encoding.
+  const nbt = require('prismarine-nbt')
+  const { parsed } = await nbt.parse(buffer)
+  const simplified = nbt.simplify(parsed)
+  const v3 = require('./sponge3').read(simplified, version)
+  if (v3) return v3
+
+  const { Schematic } = require('prismarine-schematic')
   const schematic = await Schematic.read(buffer, version)
   return schematic
 }
@@ -94,4 +113,40 @@ function schematicToBlocks (schematic) {
   }
 }
 
-module.exports = { loadSchematic, schematicToBlocks, listSchematics, SCHEMATIC_DIR }
+// How many of the schematic's bottom layers are the ground it was built on.
+//
+// Most downloaded builds include a slice of terrain: the author selected from
+// the grass down so the foundations came along. Placed as-is, that slice sits
+// ON the natural grass and the whole build stands on a plinth - the medieval
+// house at 2473,1251 did exactly that (2026-09-06). A layer counts as ground
+// when it is nearly solid AND mostly terrain blocks; a town whose bottom
+// layers are solid but full of foundations and walls (30808: 39% terrain)
+// stays put, because sinking it would bury its ground floors. The caller
+// lowers the origin by this many so the top ground layer replaces the grass.
+const TERRAIN = /^(grass_block|dirt|coarse_dirt|rooted_dirt|podzol|mud|mycelium|stone|deepslate|cobblestone|andesite|diorite|granite|tuff|gravel|sand|red_sand|sandstone|red_sandstone|clay|moss_block|pale_moss_block|dirt_path|farmland|water|snow_block|short_grass|tall_grass|fern|large_fern|moss_carpet|dandelion|poppy|azure_bluet|cornflower|oxeye_daisy|.*_flower|.*_leaves|.*_log|.*_sapling)$/
+const GROUND_MAX_LAYERS = 6
+
+function groundLayers (schematic) {
+  const start = schematic.start()
+  const end = schematic.end()
+  const area = schematic.size.x * schematic.size.z
+  let layers = 0
+  for (let y = start.y; y <= end.y && layers < GROUND_MAX_LAYERS; y++) {
+    let filled = 0
+    let terrain = 0
+    for (let z = start.z; z <= end.z; z++) {
+      for (let x = start.x; x <= end.x; x++) {
+        let b
+        try { b = schematic.getBlock(new Vec3(x, y, z)) } catch (err) { continue }
+        if (!b || b.name === 'air') continue
+        filled++
+        if (TERRAIN.test(b.name)) terrain++
+      }
+    }
+    if (filled / area >= 0.9 && terrain / filled >= 0.5) layers++
+    else break
+  }
+  return layers
+}
+
+module.exports = { loadSchematic, schematicToBlocks, listSchematics, groundLayers, SCHEMATIC_DIR }

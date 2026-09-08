@@ -1,0 +1,1072 @@
+[
+  {
+    "parts": {
+      "water": 43583,
+      "magma_block": 205,
+      "chest": 137,
+      "redstone_wall_torch": 63,
+      "furnace": 29,
+      "redstone_block": 22,
+      "redstone_torch": 17,
+      "cauldron": 14,
+      "tripwire_hook": 9,
+      "brewing_stand": 2,
+      "lava": 1,
+      "hopper": 1
+    },
+    "file": "13305.schematic",
+    "meta": "",
+    "size": "262x152x262",
+    "blocks": 2181220,
+    "palette": 158,
+    "top": [
+      "stone 67%",
+      "gravel 14%",
+      "dirt 7%",
+      "grass_block 2%",
+      "water 2%",
+      "cobblestone 2%"
+    ],
+    "unknown": [],
+    "ms": 14433,
+    "kind": "terrain",
+    "overCap": "2181220 blocks exceeds MC_MAX_BLOCKS 500000"
+  },
+  {
+    "parts": {
+      "redstone_torch": 16,
+      "lever": 2
+    },
+    "file": "13459.schematic",
+    "meta": "",
+    "size": "88x80x91",
+    "blocks": 30931,
+    "palette": 68,
+    "top": [
+      "stone 26%",
+      "prismarine 21%",
+      "snow_block 7%",
+      "nether_brick_stairs 5%",
+      "dark_oak_slab 5%",
+      "cobblestone_slab 4%"
+    ],
+    "unknown": [],
+    "ms": 956,
+    "kind": "build"
+  },
+  {
+    "parts": {
+      "bubble_column": 114,
+      "redstone_wire": 45,
+      "water": 33,
+      "sticky_piston": 22,
+      "redstone_wall_torch": 18,
+      "repeater": 14,
+      "furnace": 10,
+      "chest": 5,
+      "redstone_block": 2,
+      "slime_block": 2,
+      "redstone_torch": 2,
+      "hopper": 2
+    },
+    "file": "16267.schem",
+    "meta": "",
+    "size": "119x111x97",
+    "blocks": 117135,
+    "palette": 86,
+    "top": [
+      "cut_red_sandstone 18%",
+      "dirt 18%",
+      "grass_block 11%",
+      "cut_sandstone 10%",
+      "stone 10%",
+      "red_sandstone 8%"
+    ],
+    "unknown": [],
+    "ms": 974,
+    "kind": "build"
+  },
+  {
+    "parts": {
+      "hopper": 1718,
+      "chest": 1206,
+      "redstone_wire": 902,
+      "comparator": 301,
+      "repeater": 300,
+      "redstone_wall_torch": 280,
+      "water": 267,
+      "bubble_column": 10,
+      "observer": 2,
+      "dropper": 1,
+      "sticky_piston": 1,
+      "soul_sand": 1
+    },
+    "file": "17071.schem",
+    "meta": "",
+    "size": "124x77x141",
+    "blocks": 371176,
+    "palette": 52,
+    "top": [
+      "stone 72%",
+      "dirt 11%",
+      "grass_block 4%",
+      "andesite 2%",
+      "diorite 2%",
+      "granite 2%"
+    ],
+    "unknown": [],
+    "ms": 1149,
+    "kind": "sorter"
+  },
+  {
+    "parts": {
+      "water": 93,
+      "barrel": 20,
+      "chest": 11,
+      "cauldron": 2,
+      "blast_furnace": 1
+    },
+    "file": "20094.schem",
+    "meta": "",
+    "size": "31x19x23",
+    "blocks": 3607,
+    "palette": 87,
+    "top": [
+      "sand 33%",
+      "dirt 7%",
+      "stripped_oak_wood 6%",
+      "weathered_cut_copper_stairs 5%",
+      "oak_log 4%",
+      "oak_slab 4%"
+    ],
+    "unknown": [],
+    "ms": 35,
+    "kind": "house"
+  },
+  {
+    "parts": {
+      "water": 309719,
+      "lava": 408,
+      "barrel": 304,
+      "chest": 145,
+      "rail": 88,
+      "honey_block": 78,
+      "composter": 67,
+      "furnace": 65,
+      "bubble_column": 43,
+      "slime_block": 38,
+      "blast_furnace": 24,
+      "magma_block": 22
+    },
+    "file": "20368.schem",
+    "meta": "",
+    "size": "216x73x389",
+    "blocks": 2494427,
+    "palette": 274,
+    "top": [
+      "stone 50%",
+      "dirt 17%",
+      "water 12%",
+      "andesite 3%",
+      "diorite 3%",
+      "granite 3%"
+    ],
+    "unknown": [],
+    "ms": 6371,
+    "kind": "terrain",
+    "overCap": "2494427 blocks exceeds MC_MAX_BLOCKS 500000"
+  },
+  {
+    "parts": {
+      "barrel": 54,
+      "chest": 13
+    },
+    "file": "21961.schem",
+    "meta": "",
+    "size": "51x107x51",
+    "blocks": 45244,
+    "palette": 91,
+    "top": [
+      "deepslate_bricks 17%",
+      "dirt 14%",
+      "dark_prismarine 11%",
+      "stripped_dark_oak_wood 6%",
+      "smooth_quartz 5%",
+      "bamboo_mosaic 4%"
+    ],
+    "unknown": [],
+    "ms": 345,
+    "kind": "tower"
+  },
+  {
+    "parts": {
+      "barrel": 28,
+      "chest": 10,
+      "furnace": 4,
+      "composter": 4,
+      "blast_furnace": 2,
+      "smoker": 2,
+      "rail": 1
+    },
+    "file": "22575.schem",
+    "meta": "",
+    "size": "28x37x27",
+    "blocks": 3090,
+    "palette": 62,
+    "top": [
+      "cherry_planks 14%",
+      "smooth_quartz 10%",
+      "moss_block 8%",
+      "cherry_trapdoor 6%",
+      "stripped_cherry_wood 6%",
+      "spruce_trapdoor 6%"
+    ],
+    "unknown": [],
+    "ms": 40,
+    "kind": "house"
+  },
+  {
+    "parts": {
+      "water": 2282,
+      "rail": 72,
+      "redstone_wire": 25,
+      "tripwire_hook": 3,
+      "dispenser": 3,
+      "lever": 2,
+      "cauldron": 2,
+      "furnace": 1
+    },
+    "file": "23779.schematic",
+    "meta": "",
+    "size": "137x70x137",
+    "blocks": 79323,
+    "palette": 83,
+    "top": [
+      "dirt 45%",
+      "grass_block 16%",
+      "coarse_dirt 9%",
+      "oak_leaves 5%",
+      "spruce_log 3%",
+      "water 3%"
+    ],
+    "unknown": [],
+    "ms": 2210,
+    "kind": "terrain"
+  },
+  {
+    "parts": {
+      "water": 11445,
+      "rail": 9,
+      "lever": 2
+    },
+    "file": "24702.schem",
+    "meta": "",
+    "size": "114x107x114",
+    "blocks": 264043,
+    "palette": 168,
+    "top": [
+      "stone 50%",
+      "dirt 11%",
+      "water 4%",
+      "andesite 3%",
+      "diorite 3%",
+      "granite 3%"
+    ],
+    "unknown": [],
+    "ms": 1466,
+    "kind": "terrain"
+  },
+  {
+    "parts": {},
+    "file": "25512.litematic",
+    "meta": "\"moje koloseum\" by MlodyMiszi",
+    "size": "103x34x85",
+    "blocks": 13606,
+    "palette": 12,
+    "top": [
+      "sandstone 54%",
+      "sandstone_stairs 28%",
+      "oak_fence 6%",
+      "sandstone_wall 4%",
+      "stone 2%",
+      "oak_stairs 2%"
+    ],
+    "unknown": [],
+    "ms": 360,
+    "kind": "build"
+  },
+  {
+    "parts": {
+      "chest": 13,
+      "redstone_block": 8,
+      "dispenser": 6,
+      "lever": 3
+    },
+    "file": "25915.schem",
+    "meta": "",
+    "size": "82x31x74",
+    "blocks": 41151,
+    "palette": 111,
+    "top": [
+      "white_terracotta 20%",
+      "dark_oak_planks 11%",
+      "stone_bricks 10%",
+      "brick_stairs 7%",
+      "polished_andesite 6%",
+      "mud_brick_stairs 6%"
+    ],
+    "unknown": [],
+    "ms": 238,
+    "kind": "build"
+  },
+  {
+    "parts": {
+      "redstone_wire": 60,
+      "repeater": 14,
+      "redstone_torch": 9,
+      "bubble_column": 8,
+      "water": 8,
+      "dispenser": 5,
+      "soul_sand": 4,
+      "hopper": 4,
+      "lever": 2,
+      "comparator": 2,
+      "chest": 2,
+      "sticky_piston": 2
+    },
+    "file": "26547.litematic",
+    "meta": "\"Unnamed\" by Squad0P",
+    "size": "15x20x18",
+    "blocks": 817,
+    "palette": 31,
+    "top": [
+      "blue_concrete 52%",
+      "blue_stained_glass 13%",
+      "light_blue_concrete 8%",
+      "redstone_wire 7%",
+      "spruce_trapdoor 6%",
+      "bookshelf 2%"
+    ],
+    "unknown": [],
+    "ms": 31,
+    "kind": "redstone"
+  },
+  {
+    "parts": {
+      "nether_portal": 259308,
+      "water": 587,
+      "hopper": 75,
+      "redstone_wire": 21,
+      "chest": 16,
+      "repeater": 6,
+      "dropper": 5,
+      "comparator": 5,
+      "redstone_wall_torch": 3,
+      "observer": 3,
+      "lava": 2,
+      "sticky_piston": 2
+    },
+    "file": "27169.litematic",
+    "meta": "\"MY FARM GOLD AND AUTO CRAFT GOLD INGOT\" by 17122014",
+    "size": "76x118x80",
+    "blocks": 306397,
+    "palette": 34,
+    "top": [
+      "nether_portal 85%",
+      "obsidian 12%",
+      "white_stained_glass 2%",
+      "smooth_stone_slab 1%",
+      "spruce_trapdoor 0%",
+      "water 0%"
+    ],
+    "unknown": [
+      "waystones:waystone"
+    ],
+    "ms": 966,
+    "kind": "farm"
+  },
+  {
+    "parts": {
+      "water": 1437,
+      "hopper": 33,
+      "redstone_wire": 20,
+      "chest": 14,
+      "bubble_column": 13,
+      "lava": 9,
+      "soul_sand": 5,
+      "comparator": 4,
+      "repeater": 3,
+      "redstone_wall_torch": 2,
+      "dropper": 1,
+      "composter": 1
+    },
+    "file": "28758.litematic",
+    "meta": "\"Iron Farm with Auto-Crafter\" by NARI_10",
+    "size": "49x27x49",
+    "blocks": 4014,
+    "palette": 23,
+    "top": [
+      "stone_bricks 42%",
+      "water 36%",
+      "stone_brick_wall 5%",
+      "glass 4%",
+      "stone_brick_stairs 4%",
+      "stone_brick_slab 3%"
+    ],
+    "unknown": [],
+    "ms": 92,
+    "kind": "farm"
+  },
+  {
+    "parts": {
+      "water": 1430,
+      "redstone_wire": 4
+    },
+    "file": "29474.litematic",
+    "meta": "\"Unnamed\" by PapajXD",
+    "size": "47x24x65",
+    "blocks": 19096,
+    "palette": 94,
+    "top": [
+      "dirt 31%",
+      "grass_block 18%",
+      "water 7%",
+      "cobblestone 6%",
+      "andesite 6%",
+      "moss_block 5%"
+    ],
+    "unknown": [],
+    "ms": 111,
+    "kind": "build"
+  },
+  {
+    "parts": {
+      "barrel": 19
+    },
+    "file": "30802.schem",
+    "meta": "",
+    "size": "30x28x20",
+    "blocks": 5575,
+    "palette": 61,
+    "top": [
+      "stripped_oak_wood 19%",
+      "oak_planks 19%",
+      "stripped_jungle_wood 12%",
+      "grass_block 12%",
+      "stone 4%",
+      "spruce_leaves 4%"
+    ],
+    "unknown": [],
+    "ms": 24,
+    "kind": "house"
+  },
+  {
+    "parts": {
+      "water": 316,
+      "hopper": 37,
+      "nether_portal": 21,
+      "lever": 14
+    },
+    "file": "30808.schem",
+    "meta": "",
+    "size": "73x122x121",
+    "blocks": 320971,
+    "palette": 123,
+    "top": [
+      "packed_mud 13%",
+      "oak_planks 13%",
+      "grass_block 10%",
+      "stripped_oak_wood 9%",
+      "granite 9%",
+      "stone_bricks 8%"
+    ],
+    "unknown": [],
+    "ms": 1121,
+    "kind": "build"
+  },
+  {
+    "parts": {
+      "barrel": 9
+    },
+    "file": "30853.schem",
+    "meta": "",
+    "size": "36x55x29",
+    "blocks": 13474,
+    "palette": 108,
+    "top": [
+      "oak_planks 22%",
+      "stripped_oak_wood 12%",
+      "grass_block 8%",
+      "stripped_jungle_wood 8%",
+      "stone 5%",
+      "stripped_dark_oak_wood 5%"
+    ],
+    "unknown": [],
+    "ms": 68,
+    "kind": "build"
+  },
+  {
+    "parts": {
+      "water": 178,
+      "cauldron": 6,
+      "barrel": 3
+    },
+    "file": "30869.schem",
+    "meta": "",
+    "size": "41x62x31",
+    "blocks": 43292,
+    "palette": 110,
+    "top": [
+      "oak_planks 17%",
+      "stripped_oak_wood 13%",
+      "stripped_jungle_wood 12%",
+      "brown_mushroom_block 11%",
+      "jungle_planks 10%",
+      "packed_mud 9%"
+    ],
+    "unknown": [],
+    "ms": 99,
+    "kind": "build"
+  },
+  {
+    "parts": {
+      "water": 389,
+      "barrel": 53,
+      "honey_block": 51
+    },
+    "file": "30878.schem",
+    "meta": "",
+    "size": "28x37x28",
+    "blocks": 8851,
+    "palette": 88,
+    "top": [
+      "oak_planks 16%",
+      "stripped_jungle_wood 14%",
+      "stripped_oak_wood 13%",
+      "grass_block 8%",
+      "jungle_planks 5%",
+      "water 4%"
+    ],
+    "unknown": [],
+    "ms": 39,
+    "kind": "house"
+  },
+  {
+    "parts": {
+      "chest": 90,
+      "barrel": 14,
+      "furnace": 1,
+      "tripwire_hook": 1
+    },
+    "file": "30983.schem",
+    "meta": "",
+    "size": "13x21x23",
+    "blocks": 2954,
+    "palette": 55,
+    "top": [
+      "stripped_spruce_wood 38%",
+      "spruce_planks 8%",
+      "spruce_stairs 8%",
+      "cobbled_deepslate_stairs 7%",
+      "calcite 4%",
+      "spruce_trapdoor 4%"
+    ],
+    "unknown": [],
+    "ms": 12,
+    "kind": "house"
+  },
+  {
+    "parts": {
+      "chest": 42,
+      "barrel": 8,
+      "tripwire_hook": 1
+    },
+    "file": "30984.schem",
+    "meta": "",
+    "size": "20x23x15",
+    "blocks": 2586,
+    "palette": 52,
+    "top": [
+      "stripped_spruce_wood 34%",
+      "gray_concrete 8%",
+      "spruce_planks 7%",
+      "spruce_stairs 6%",
+      "cobbled_deepslate_stairs 6%",
+      "spruce_trapdoor 5%"
+    ],
+    "unknown": [],
+    "ms": 16,
+    "kind": "house"
+  },
+  {
+    "parts": {
+      "barrel": 8,
+      "tripwire_hook": 3,
+      "furnace": 1,
+      "brewing_stand": 1
+    },
+    "file": "31002.schem",
+    "meta": "",
+    "size": "13x18x16",
+    "blocks": 1421,
+    "palette": 49,
+    "top": [
+      "spruce_planks 21%",
+      "stripped_spruce_wood 15%",
+      "spruce_stairs 9%",
+      "cobbled_deepslate_stairs 8%",
+      "spruce_trapdoor 6%",
+      "calcite 5%"
+    ],
+    "unknown": [],
+    "ms": 11,
+    "kind": "house"
+  },
+  {
+    "parts": {},
+    "file": "31155.schem",
+    "meta": "",
+    "size": "29x33x31",
+    "blocks": 2785,
+    "palette": 57,
+    "top": [
+      "grass_block 10%",
+      "stone_bricks 8%",
+      "mossy_stone_bricks 7%",
+      "stone 7%",
+      "cobblestone 7%",
+      "andesite 7%"
+    ],
+    "unknown": [],
+    "ms": 37,
+    "kind": "house"
+  },
+  {
+    "parts": {},
+    "file": "31156.schem",
+    "meta": "",
+    "size": "25x19x23",
+    "blocks": 1952,
+    "palette": 25,
+    "top": [
+      "moss_block 20%",
+      "stone_bricks 12%",
+      "mud_bricks 11%",
+      "spruce_trapdoor 9%",
+      "stripped_oak_wood 6%",
+      "grass_block 5%"
+    ],
+    "unknown": [],
+    "ms": 47,
+    "kind": "house"
+  },
+  {
+    "parts": {},
+    "file": "31181.schem",
+    "meta": "",
+    "size": "39x32x32",
+    "blocks": 4206,
+    "palette": 36,
+    "top": [
+      "grass_block 24%",
+      "spruce_planks 10%",
+      "tall_grass 9%",
+      "blue_stained_glass_pane 6%",
+      "orange_concrete 6%",
+      "orange_wool 5%"
+    ],
+    "unknown": [],
+    "ms": 51,
+    "kind": "house"
+  },
+  {
+    "parts": {
+      "barrel": 124,
+      "water": 12
+    },
+    "file": "31244.schem",
+    "meta": "",
+    "size": "56x42x61",
+    "blocks": 12266,
+    "palette": 62,
+    "top": [
+      "grass_block 19%",
+      "oak_planks 11%",
+      "calcite 11%",
+      "short_grass 6%",
+      "farmland 4%",
+      "wheat 4%"
+    ],
+    "unknown": [],
+    "ms": 146,
+    "kind": "build"
+  },
+  {
+    "parts": {
+      "barrel": 15,
+      "chest": 10,
+      "furnace": 2,
+      "smoker": 1,
+      "brewing_stand": 1
+    },
+    "file": "31257.litematic",
+    "meta": "\"Unnamed\" by xMsBean",
+    "size": "33x25x27",
+    "blocks": 2514,
+    "palette": 51,
+    "top": [
+      "cherry_planks 25%",
+      "cherry_stairs 19%",
+      "birch_planks 10%",
+      "stripped_cherry_wood 8%",
+      "cherry_slab 6%",
+      "cherry_trapdoor 5%"
+    ],
+    "unknown": [],
+    "ms": 45,
+    "kind": "house"
+  },
+  {
+    "file": "31259.schem",
+    "kind": "unreadable",
+    "error": "Cannot read properties of undefined (reading 'length')"
+  },
+  {
+    "parts": {
+      "barrel": 65,
+      "composter": 34,
+      "lever": 12,
+      "chest": 6,
+      "furnace": 2
+    },
+    "file": "31260.schem",
+    "meta": "",
+    "size": "293x212x261",
+    "blocks": 1004679,
+    "palette": 80,
+    "top": [
+      "coal_ore 89%",
+      "polished_blackstone 3%",
+      "cracked_polished_blackstone_bricks 2%",
+      "snow 1%",
+      "packed_ice 1%",
+      "spruce_leaves 1%"
+    ],
+    "unknown": [],
+    "ms": 14858,
+    "kind": "terrain",
+    "overCap": "1004679 blocks exceeds MC_MAX_BLOCKS 500000"
+  },
+  {
+    "file": "31261.schem",
+    "kind": "unreadable",
+    "error": "Cannot read properties of undefined (reading 'length')"
+  },
+  {
+    "parts": {},
+    "file": "31353.schem",
+    "meta": "",
+    "size": "152x124x104",
+    "blocks": 30171,
+    "palette": 13,
+    "top": [
+      "polished_blackstone 88%",
+      "polished_blackstone_bricks 5%",
+      "polished_andesite 2%",
+      "stone_bricks 1%",
+      "cracked_stone_bricks 1%",
+      "smooth_stone 1%"
+    ],
+    "unknown": [],
+    "ms": 1921,
+    "kind": "statue"
+  },
+  {
+    "parts": {
+      "chest": 48,
+      "barrel": 16,
+      "furnace": 4,
+      "smoker": 4,
+      "blast_furnace": 1,
+      "hopper": 1
+    },
+    "file": "31417.schem",
+    "meta": "",
+    "size": "59x62x54",
+    "blocks": 26620,
+    "palette": 76,
+    "top": [
+      "dirt 40%",
+      "stone 10%",
+      "yellow_concrete 7%",
+      "yellow_concrete_powder 5%",
+      "moss_block 4%",
+      "yellow_terracotta 4%"
+    ],
+    "unknown": [],
+    "ms": 193,
+    "kind": "build"
+  },
+  {
+    "parts": {},
+    "file": "31438.schem",
+    "meta": "",
+    "size": "122x124x42",
+    "blocks": 28868,
+    "palette": 13,
+    "top": [
+      "polished_blackstone 84%",
+      "polished_andesite 5%",
+      "smooth_stone 4%",
+      "polished_diorite 3%",
+      "stone_bricks 1%",
+      "cracked_stone_bricks 1%"
+    ],
+    "unknown": [],
+    "ms": 605,
+    "kind": "statue"
+  },
+  {
+    "parts": {},
+    "file": "31441.schem",
+    "meta": "",
+    "size": "36x41x58",
+    "blocks": 5746,
+    "palette": 43,
+    "top": [
+      "grass_block 29%",
+      "cobblestone 18%",
+      "deepslate_bricks 11%",
+      "oak_planks 9%",
+      "oak_log 8%",
+      "spruce_stairs 4%"
+    ],
+    "unknown": [],
+    "ms": 89,
+    "kind": "house"
+  },
+  {
+    "parts": {
+      "barrel": 21,
+      "chest": 6,
+      "furnace": 1,
+      "brewing_stand": 1
+    },
+    "file": "31442.schem",
+    "meta": "",
+    "size": "22x49x21",
+    "blocks": 1976,
+    "palette": 53,
+    "top": [
+      "grass_block 16%",
+      "stone 13%",
+      "deepslate_bricks 11%",
+      "stone_bricks 7%",
+      "dirt 7%",
+      "oak_planks 6%"
+    ],
+    "unknown": [],
+    "ms": 30,
+    "kind": "tower"
+  },
+  {
+    "parts": {},
+    "file": "31445.schem",
+    "meta": "",
+    "size": "27x32x28",
+    "blocks": 2828,
+    "palette": 57,
+    "top": [
+      "white_concrete 15%",
+      "stone 6%",
+      "andesite 6%",
+      "light_gray_concrete_powder 5%",
+      "spruce_wall_sign 5%",
+      "diorite 5%"
+    ],
+    "unknown": [],
+    "ms": 38,
+    "kind": "house"
+  },
+  {
+    "parts": {},
+    "file": "31448.schem",
+    "meta": "",
+    "size": "30x25x26",
+    "blocks": 3453,
+    "palette": 49,
+    "top": [
+      "warped_planks 15%",
+      "white_concrete 15%",
+      "stone 6%",
+      "andesite 6%",
+      "spruce_wall_sign 5%",
+      "oak_planks 5%"
+    ],
+    "unknown": [],
+    "ms": 34,
+    "kind": "house"
+  },
+  {
+    "parts": {
+      "barrel": 6,
+      "chest": 6
+    },
+    "file": "31497.litematic",
+    "meta": "\"Medieval House 5\" by ClaraNeto",
+    "size": "21x31x19",
+    "blocks": 2249,
+    "palette": 50,
+    "top": [
+      "grass_block 15%",
+      "white_terracotta 9%",
+      "spruce_planks 9%",
+      "spruce_stairs 8%",
+      "stripped_spruce_log 8%",
+      "acacia_stairs 5%"
+    ],
+    "unknown": [],
+    "ms": 29,
+    "kind": "house"
+  },
+  {
+    "parts": {},
+    "file": "31502.schem",
+    "meta": "",
+    "size": "109x136x73",
+    "blocks": 42742,
+    "palette": 13,
+    "top": [
+      "smooth_stone 41%",
+      "polished_diorite 27%",
+      "polished_andesite 11%",
+      "vine 5%",
+      "pale_oak_leaves 4%",
+      "flowering_azalea_leaves 3%"
+    ],
+    "unknown": [],
+    "ms": 1028,
+    "kind": "tower"
+  },
+  {
+    "parts": {
+      "water": 6378,
+      "rail": 19,
+      "cauldron": 11,
+      "hopper": 8
+    },
+    "file": "31515.schematic",
+    "meta": "",
+    "size": "101x75x113",
+    "blocks": 54594,
+    "palette": 77,
+    "top": [
+      "terracotta 21%",
+      "stone 13%",
+      "light_gray_wool 12%",
+      "water 12%",
+      "lapis_block 11%",
+      "andesite 6%"
+    ],
+    "unknown": [],
+    "ms": 1365,
+    "kind": "build"
+  },
+  {
+    "parts": {
+      "redstone_wire": 123,
+      "redstone_wall_torch": 66,
+      "repeater": 47,
+      "redstone_torch": 39,
+      "hopper": 25,
+      "comparator": 18,
+      "dropper": 13,
+      "lever": 13,
+      "sticky_piston": 12,
+      "chest": 11,
+      "note_block": 3,
+      "water": 1
+    },
+    "file": "4271.schematic",
+    "meta": "",
+    "size": "20x12x13",
+    "blocks": 1086,
+    "palette": 21,
+    "top": [
+      "sandstone 35%",
+      "iron_block 22%",
+      "redstone_wire 11%",
+      "redstone_wall_torch 6%",
+      "repeater 4%",
+      "redstone_torch 4%"
+    ],
+    "unknown": [],
+    "ms": 13,
+    "kind": "redstone"
+  },
+  {
+    "parts": {
+      "redstone_wire": 812,
+      "powered_rail": 600,
+      "repeater": 156,
+      "redstone_torch": 129,
+      "redstone_wall_torch": 99,
+      "rail": 81,
+      "daylight_detector": 34,
+      "detector_rail": 33,
+      "hopper": 32,
+      "chest": 16,
+      "lava": 14,
+      "water": 10
+    },
+    "file": "5058.schematic",
+    "meta": "",
+    "size": "93x30x93",
+    "blocks": 77662,
+    "palette": 69,
+    "top": [
+      "stone 32%",
+      "dirt 27%",
+      "bedrock 11%",
+      "quartz_slab 6%",
+      "chiseled_sandstone 6%",
+      "quartz_block 3%"
+    ],
+    "unknown": [],
+    "ms": 488,
+    "kind": "redstone"
+  },
+  {
+    "parts": {},
+    "file": "house7.schem",
+    "meta": "",
+    "size": "26x16x23",
+    "blocks": 2929,
+    "palette": 54,
+    "top": [
+      "stone 14%",
+      "white_terracotta 12%",
+      "brick_stairs 11%",
+      "oak_log 10%",
+      "dirt 9%",
+      "spruce_planks 8%"
+    ],
+    "unknown": [],
+    "ms": 15,
+    "kind": "house"
+  },
+  {
+    "parts": {},
+    "file": "test-cube.schem",
+    "meta": "",
+    "size": "3x3x3",
+    "blocks": 26,
+    "palette": 1,
+    "top": [
+      "stone 100%"
+    ],
+    "unknown": [],
+    "ms": 3,
+    "kind": "house"
+  }
+]
