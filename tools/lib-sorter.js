@@ -7,19 +7,31 @@ const { DATA_VERSION, SERVER } = require('../src/version')
 // and index the same item list.
 
 const fs = require('fs')
+const path = require('path')
 const { baseName } = require('../src/building/blockspec')
 
+// Never sorted, whatever the registry says: command-only or not obtainable in
+// survival. A slot charged with one of these is a slot wasted, and a label
+// showing a command block is embarrassing.
+const UNOBTAINABLE = /^(.*command_block|structure_block|structure_void|jigsaw|barrier|light|debug_stick|knowledge_book|spawner|trial_spawner|vault|reinforced_deepslate|bedrock|end_portal_frame|chorus_plant|farmland|dirt_path|budding_amethyst|frogspawn|suspicious_sand|suspicious_gravel|petrified_oak_slab|player_head|.*_spawn_egg|infested_.*|filled_map|.*_smithing_template|.*_banner_pattern|.*_pottery_sherd|bundle|.*_bundle|enchanted_book|written_book|writable_book|ominous_bottle|tipped_arrow|spectral_arrow|firework_star|firework_rocket|heavy_core|trial_key|ominous_trial_key|air|.*_candle_cake|test_block|test_instance_block)$/
+
+// Obtainable, but an intermediate nobody keeps: the six-sided wood variants
+// and concrete powder. Dropped so the stairs and glass fit in 280 slots.
+const NOT_WORTH_A_SLOT = /(^|_)wood$|^stripped_.*_(wood|hyphae)$|_concrete_powder$/
+
 const CATEGORIES = [
-  /_ingot$|^(coal|diamond|emerald|quartz|nether_star|raw_iron|raw_gold|raw_copper|copper_ingot|netherite_scrap)$/,
+  /_ingot$|^(coal|charcoal|diamond|emerald|quartz|amethyst_shard|lapis_lazuli|redstone|nether_star|raw_iron|raw_gold|raw_copper|netherite_scrap|echo_shard|prismarine_shard|prismarine_crystals)$/,
   /_ore$|^(ancient_debris|raw_iron_block|raw_gold_block|raw_copper_block)$/,
-  /_block$/,
-  /^(cobblestone|stone|granite|diorite|andesite|deepslate|cobbled_deepslate|tuff|calcite|basalt|blackstone|netherrack|end_stone|obsidian|smooth_stone|sandstone|red_sandstone)$/,
-  /_planks$/, /_log$|_wood$|^stripped_/, /_leaves$/, /_sapling$/,
-  /^(dirt|coarse_dirt|podzol|mud|clay|gravel|sand|red_sand|soul_sand|soul_soil|grass_block|moss_block|mycelium)$/,
-  /_wool$/, /_terracotta$/, /_concrete$/, /_concrete_powder$/, /_glass$/,
-  /_stairs$/, /_slab$/, /_fence$/, /_wall$/, /_door$/, /_trapdoor$/,
-  /^(redstone|repeater|comparator|piston|sticky_piston|observer|hopper|dropper|dispenser|lever|tripwire_hook|target|daylight_detector|note_block|rail|powered_rail|detector_rail|activator_rail)$/,
-  /^(wheat|carrot|potato|beetroot|bread|apple|melon_slice|sugar_cane|sugar|bamboo|kelp|cocoa_beans|nether_wart|bone_meal|bone|feather|leather|string|flint|gunpowder|blaze_rod|ender_pearl|slime_ball|honeycomb)$/,
+  /^(iron_block|gold_block|diamond_block|emerald_block|netherite_block|copper_block|lapis_block|redstone_block|coal_block|quartz_block|amethyst_block)$/,
+  /^(cobblestone|stone|granite|diorite|andesite|deepslate|cobbled_deepslate|tuff|calcite|basalt|blackstone|netherrack|end_stone|obsidian|crying_obsidian|smooth_stone|sandstone|red_sandstone|mossy_cobblestone|stone_bricks|mossy_stone_bricks|deepslate_bricks|deepslate_tiles|polished_.*|.*_bricks|bricks|packed_mud|mud_bricks|glowstone|sea_lantern|shroomlight|prismarine|dark_prismarine)$/,
+  /_planks$/, /_log$|_stem$/, /_leaves$/, /_sapling$|_propagule$/,
+  /^(dirt|coarse_dirt|rooted_dirt|podzol|mud|clay|gravel|sand|red_sand|soul_sand|soul_soil|grass_block|moss_block|mycelium|snow_block|ice|packed_ice|blue_ice|magma_block|sponge|wet_sponge|hay_block|bone_block|dried_kelp_block|honey_block|slime_block)$/,
+  /_glass$|_glass_pane$/, /_wool$/, /_terracotta$|^terracotta$/, /_concrete$/, /_dye$/, /_carpet$/,
+  /_stairs$/, /_slab$/, /_wall$/, /_fence$|_fence_gate$/, /_door$/, /_trapdoor$/,
+  /^(redstone_torch|torch|soul_torch|lantern|soul_lantern|repeater|comparator|piston|sticky_piston|observer|hopper|dropper|dispenser|lever|tripwire_hook|target|daylight_detector|note_block|rail|powered_rail|detector_rail|activator_rail|chest|barrel|crafting_table|furnace|blast_furnace|smoker|composter|ladder|scaffolding|tnt|item_frame|glow_item_frame|flower_pot)$/,
+  /^(wheat|wheat_seeds|carrot|potato|baked_potato|beetroot|beetroot_seeds|bread|apple|golden_apple|melon_slice|melon|pumpkin|carved_pumpkin|sugar_cane|sugar|bamboo|kelp|dried_kelp|cocoa_beans|nether_wart|sweet_berries|glow_berries|cactus|egg|cooked_beef|cooked_porkchop|cooked_chicken|cooked_mutton|cooked_cod|cooked_salmon|beef|porkchop|chicken|mutton|cod|salmon|rotten_flesh|spider_eye|glow_ink_sac|ink_sac)$/,
+  /^(bone|bone_meal|feather|leather|string|flint|gunpowder|blaze_rod|blaze_powder|ender_pearl|slime_ball|honeycomb|arrow|stick|paper|book|glass_bottle|clay_ball|brick|nether_brick|phantom_membrane|magma_cream|ghast_tear|rabbit_hide|rabbit_foot|turtle_scute|armadillo_scute|nautilus_shell|heart_of_the_sea)$/,
+  /^(poppy|dandelion|blue_orchid|allium|azure_bluet|.*_tulip|oxeye_daisy|cornflower|lily_of_the_valley|sunflower|lilac|rose_bush|peony|torchflower|pitcher_plant|pink_petals|wildflowers|lily_pad|vine|glow_lichen|moss_carpet|azalea|flowering_azalea|fern|large_fern|short_grass|tall_grass|dead_bush|sea_pickle|seagrass|.*_coral|.*_coral_block|.*_coral_fan)$/,
   /^(oak|birch|spruce|jungle|acacia|dark_oak|mangrove|cherry|bamboo|crimson|warped|pale_oak)_/
 ]
 
@@ -27,10 +39,12 @@ function defaultItems (registry, need) {
   const all = Object.values(registry.itemsByName)
     .filter(i => (i.stackSize || 64) === 64)
     .map(i => i.name)
+    .filter(n => !UNOBTAINABLE.test(n) && !NOT_WORTH_A_SLOT.test(n))
+    .sort()
   const out = []
   const seen = new Set()
   for (const re of CATEGORIES) {
-    for (const name of all.sort()) {
+    for (const name of all) {
       if (seen.has(name) || !re.test(name)) continue
       seen.add(name); out.push(name)
       if (out.length >= need) return out
@@ -38,13 +52,19 @@ function defaultItems (registry, need) {
   }
   // Top up with whatever is left rather than leaving slots unfilled - an
   // unfilled slot is not neutral, it swallows things.
-  for (const name of all.sort()) {
+  for (const name of all) {
     if (seen.has(name)) continue
     seen.add(name); out.push(name)
     if (out.length >= need) break
   }
   return out
 }
+
+// The list a sorter is actually charged with. Precedence: --items <file>, then
+// the committed schematics/sorter-items.txt (edit that to change what goes
+// where - the order is the order the item stream meets the filters), then the
+// generated default. Unobtainable items are dropped from every source.
+const DEFAULT_LIST = path.join(__dirname, '..', 'schematics', 'sorter-items.txt')
 
 // A filter hopper is a hopper with a comparator reading it.
 function isFilterAt (cmp, x, y, z) {
@@ -139,11 +159,14 @@ function findFilters (blocks) {
 
 function itemsFor (need, listFile) {
   const registry = require('minecraft-data')(DATA_VERSION)
-  let items = listFile
-    ? fs.readFileSync(listFile, 'utf8').split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#'))
+  const file = listFile || (fs.existsSync(DEFAULT_LIST) ? DEFAULT_LIST : null)
+  const items = file
+    ? fs.readFileSync(file, 'utf8').split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#'))
     : defaultItems(registry, need)
   return items.map(n => (n.startsWith('minecraft:') ? n : 'minecraft:' + n))
     .filter(n => registry.itemsByName[n.replace('minecraft:', '')])
+    .filter(n => !UNOBTAINABLE.test(n.replace('minecraft:', '')))
+    .slice(0, need)
 }
 
-module.exports = { findFilters, itemsFor, defaultItems }
+module.exports = { findFilters, itemsFor, defaultItems, UNOBTAINABLE, NOT_WORTH_A_SLOT }
