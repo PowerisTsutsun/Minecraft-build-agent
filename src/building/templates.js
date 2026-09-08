@@ -181,10 +181,17 @@ function schematicToBlocks (schematic) {
 }
 
 // The setup script, with ~x ~y ~z resolved against where the template landed.
+// Offsets may be fractional. Entities sit at fractional positions - the boat in
+// the iron farm is at ~2.5 ~2 ~5.7 - and an integer-only pattern left that line
+// untouched, so the bot would have sent it as-is: relative to wherever BuilderBot
+// happened to be standing, not to the template.
 function setupCommands (info, origin) {
+  const num = '(-?\\d+(?:\\.\\d+)?)'
+  const re = new RegExp(`~${num}\\s+~${num}\\s+~${num}`, 'g')
+  const fmt = v => Number.isInteger(v) ? String(v) : v.toFixed(2).replace(/0+$/, '').replace(/\.$/, '')
   return info.setup.map(line =>
-    line.replace(/~(-?\d+)\s+~(-?\d+)\s+~(-?\d+)/g, (m, x, y, z) =>
-      `${origin.x + Number(x)} ${origin.y + Number(y)} ${origin.z + Number(z)}`))
+    line.replace(re, (m, x, y, z) =>
+      `${fmt(origin.x + Number(x))} ${fmt(origin.y + Number(y))} ${fmt(origin.z + Number(z))}`))
 }
 
 // Cells the decorator and the planner must not touch.
@@ -202,4 +209,39 @@ function protectedCells (info, origin) {
   return cells
 }
 
-module.exports = { list, describe, load, exportRegion, schematicToBlocks, setupCommands, protectedCells, DIR, NAME }
+// The ground around a machine is part of the machine. An iron farm's golems
+// spawn anywhere in a 16-wide box around the village centre, so any full block
+// with air above it within 8 blocks of the walls grows golems outside the
+// killing chamber. The by-hand fix is a shovel: right-click the grass into
+// dirt_path, which is a fifteen-sixteenths block, and nothing spawns on it.
+// A .schem cannot carry that, because it holds blocks, not the state of the
+// ground around them - the original was captured with plain grass outside.
+// meta.json carries a `surface` box instead:
+//   "surface": { "margin": 8, "block": "dirt_path" }
+// Every column within `margin` of the footprint, outside it, gets its natural
+// top block replaced with `block`. Air and anything that is already right is
+// left alone.
+function surfaceBlocks (bot, info, origin) {
+  const c = info.meta.surface
+  if (!c || !c.margin) return []
+  const size = info.meta.size
+  const name = c.block || 'dirt_path'
+  // findSite lands a template on the first air above solid ground, then
+  // placement sinks it by meta.ground layers - so the natural surface is the
+  // template's top ground layer, or the layer under the origin if it has none.
+  const ground = Number(info.meta.ground) || 0
+  const surface = origin.y + ground - 1
+  const blocks = []
+  for (let x = -c.margin; x < size.x + c.margin; x++) {
+    for (let z = -c.margin; z < size.z + c.margin; z++) {
+      if (x >= 0 && x < size.x && z >= 0 && z < size.z) continue
+      const pos = new Vec3(origin.x + x, surface, origin.z + z)
+      const here = bot.blockAt(pos)
+      if (here && (here.name === 'air' || here.name === name || here.name === 'bedrock')) continue
+      blocks.push({ pos: pos.minus(origin), name })
+    }
+  }
+  return blocks
+}
+
+module.exports = { list, describe, load, exportRegion, schematicToBlocks, setupCommands, protectedCells, surfaceBlocks, DIR, NAME }

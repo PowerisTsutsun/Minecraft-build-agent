@@ -1,0 +1,57 @@
+# Entities for "Iron Farm with Auto-Crafter" by NARI_10 (28758.litematic).
+# ~x ~y ~z are offsets from the template origin (its min corner).
+#
+# EIGHT VILLAGER PODS at y24, 3 beds each, on the four sides. Golem spawning
+# needs THREE villagers together who have slept and been scared, so every pod
+# gets three: one on the single free floor cell, two standing on beds (a bed is
+# 9/16 tall; they land on it fine). No profession needed - this design panics
+# them, it does not make them work.
+#
+# FOUR ZOMBIES, one per side, in a soul-sand bubble column at y21/22 between
+# two pods, capped by slabs at y24-26 so they bob at eye level of both pods
+# through the glass. In water a zombie turns into a drowned after 30s; drowned
+# scare villagers just the same, so that is fine. The fifth soul sand at y0 is
+# the item elevator for the auto-crafter, not a zombie spot.
+#
+# Villagers and zombies are summoned AFTER the blocks, so the pods are closed.
+
+/summon minecraft:villager ~17.5 ~24 ~4.5 {PersistenceRequired:1b}
+/summon minecraft:villager ~16.5 ~24 ~3.5 {PersistenceRequired:1b}
+/summon minecraft:villager ~17.5 ~24 ~3.5 {PersistenceRequired:1b}
+/summon minecraft:villager ~31.5 ~24 ~4.5 {PersistenceRequired:1b}
+/summon minecraft:villager ~30.5 ~24 ~3.5 {PersistenceRequired:1b}
+/summon minecraft:villager ~31.5 ~24 ~3.5 {PersistenceRequired:1b}
+/summon minecraft:villager ~4.5 ~24 ~17.5 {PersistenceRequired:1b}
+/summon minecraft:villager ~3.5 ~24 ~16.5 {PersistenceRequired:1b}
+/summon minecraft:villager ~4.5 ~24 ~16.5 {PersistenceRequired:1b}
+/summon minecraft:villager ~44.5 ~24 ~17.5 {PersistenceRequired:1b}
+/summon minecraft:villager ~43.5 ~24 ~16.5 {PersistenceRequired:1b}
+/summon minecraft:villager ~44.5 ~24 ~16.5 {PersistenceRequired:1b}
+/summon minecraft:villager ~4.5 ~24 ~31.5 {PersistenceRequired:1b}
+/summon minecraft:villager ~3.5 ~24 ~30.5 {PersistenceRequired:1b}
+/summon minecraft:villager ~4.5 ~24 ~30.5 {PersistenceRequired:1b}
+/summon minecraft:villager ~44.5 ~24 ~31.5 {PersistenceRequired:1b}
+/summon minecraft:villager ~44.5 ~24 ~30.5 {PersistenceRequired:1b}
+/summon minecraft:villager ~45.5 ~24 ~30.5 {PersistenceRequired:1b}
+/summon minecraft:villager ~17.5 ~24 ~44.5 {PersistenceRequired:1b}
+/summon minecraft:villager ~16.5 ~24 ~43.5 {PersistenceRequired:1b}
+/summon minecraft:villager ~16.5 ~24 ~44.5 {PersistenceRequired:1b}
+/summon minecraft:villager ~31.5 ~24 ~44.5 {PersistenceRequired:1b}
+/summon minecraft:villager ~30.5 ~24 ~43.5 {PersistenceRequired:1b}
+/summon minecraft:villager ~30.5 ~24 ~44.5 {PersistenceRequired:1b}
+
+/summon minecraft:zombie ~24.5 ~22 ~4.5 {PersistenceRequired:1b,Silent:1b,HandItems:[{},{}],ArmorItems:[{},{},{},{}]}
+/summon minecraft:zombie ~4.5 ~22 ~24.5 {PersistenceRequired:1b,Silent:1b,HandItems:[{},{}],ArmorItems:[{},{},{},{}]}
+/summon minecraft:zombie ~44.5 ~22 ~24.5 {PersistenceRequired:1b,Silent:1b,HandItems:[{},{}],ArmorItems:[{},{},{},{}]}
+/summon minecraft:zombie ~24.5 ~22 ~44.5 {PersistenceRequired:1b,Silent:1b,HandItems:[{},{}],ArmorItems:[{},{},{},{}]}
+
+# FILTER HOPPERS. The sorting tower at x24 has two filter hoppers at y7: z32
+# feeds the composter (poppies -> bone meal), z33 feeds the crafter (ingots ->
+# iron blocks). A filter hopper only works pre-loaded: 41 of the target item
+# plus one junk item in each of the other four slots, so the comparator behind
+# it reads exactly 2 and flips to 3 when one more target arrives. That
+# inventory is block data, which the author's .litematic did not include, so
+# both hoppers arrived empty and the sorter did nothing (2026-09-06). Sticks are
+# the junk because a golem never drops one.
+/data merge block ~24 ~7 ~32 {Items:[{Slot:0b,id:"minecraft:poppy",count:41},{Slot:1b,id:"minecraft:stick",count:1},{Slot:2b,id:"minecraft:stick",count:1},{Slot:3b,id:"minecraft:stick",count:1},{Slot:4b,id:"minecraft:stick",count:1}]}
+/data merge block ~24 ~7 ~33 {Items:[{Slot:0b,id:"minecraft:iron_ingot",count:41},{Slot:1b,id:"minecraft:stick",count:1},{Slot:2b,id:"minecraft:stick",count:1},{Slot:3b,id:"minecraft:stick",count:1},{Slot:4b,id:"minecraft:stick",count:1}]}

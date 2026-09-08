@@ -1,0 +1,40 @@
+{
+  "name": "gold_farm_portal",
+  "size": {
+    "x": 76,
+    "y": 118,
+    "z": 80
+  },
+  "version": "26.1",
+  "exported": "2026-09-06",
+  "blocks": 306399,
+  "protect": {
+    "from": {
+      "x": 0,
+      "y": 0,
+      "z": 0
+    },
+    "to": {
+      "x": 75,
+      "y": 117,
+      "z": 79
+    }
+  },
+  "ground": 0,
+  "notable": {
+    "nether_portal": 259308,
+    "obsidian": 35280,
+    "hopper": 75,
+    "chest": 16,
+    "crafter": 1,
+    "lava": 2,
+    "turtle_egg": 16,
+    "water": 587
+  },
+  "needs": [
+    "no mobs to summon - zombified piglins spawn from the portal blocks while a player is nearby",
+    "3 loaded filter hoppers (setup.txt)"
+  ],
+  "produces": "gold ingots (crafter, chest at the bottom of the sorter), gold ingots/rare drops in the side chests; rotten flesh is burned",
+  "source": "converted 2026-09-06 from schematics/27169.litematic (\"MY FARM GOLD AND AUTO CRAFT GOLD INGOT\" by 17122014). First placement lost all 277k portal blocks because they were filled before their obsidian frames were complete; fill order now puts portals last."
+}

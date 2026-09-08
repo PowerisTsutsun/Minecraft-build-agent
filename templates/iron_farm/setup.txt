@@ -3,8 +3,20 @@
 # workstation they can path to.
 #
 # ~x ~y ~z are offsets from the template's origin corner, resolved at placement.
+# Origin is the FLOOR layer (re-captured 2026-09-06 without the buried dirt),
+# so y offsets are one less than the first capture had.
 # Positions taken from a farm verified producing iron - 53 ingots in its chest
 # when it was captured.
+#
+# VILLAGERS GO AT THE EAST END OF THE PEN, CENTRED ON A CELL (.5). The pen is
+# x1..9, z4..6 at walking height; x10 is stairs, z3 and z7 are walls. Two rules:
+#  - never summon into a wall block: it gets pushed out to the nearest free
+#    side, and the old ~10 ~7 offset sat in the south-wall stairs, so one
+#    villager ended up 25 blocks outside the farm (2026-09-06).
+#  - keep them at x >= 7. The zombie's boat is at x2.5 and a zombie in a boat
+#    still swings at anything within reach - a villager summoned at x5.5
+#    wandered over and was "slain by Zombie" (2026-09-06). The original farm
+#    keeps its villagers at x7..10 by the beds and workstations.
 #
 # THE ZOMBIE RIDES A BOAT. A boat is an entity, so a .schem cannot carry it, and
 # it is the whole containment: a zombie in a boat cannot move at all, while
@@ -12,7 +24,7 @@
 # the same cell drifted around inside it - which is not the same design. It
 # keeps its AI on purpose: a NoAI zombie is not detected as hostile at all.
 
-/summon minecraft:villager ~7 ~3 ~4 {VillagerData:{profession:"minecraft:fletcher",level:2,type:"minecraft:plains"},PersistenceRequired:1b}
-/summon minecraft:villager ~7 ~3 ~6 {VillagerData:{profession:"minecraft:fletcher",level:2,type:"minecraft:plains"},PersistenceRequired:1b}
-/summon minecraft:villager ~10 ~3 ~7 {VillagerData:{profession:"minecraft:fletcher",level:2,type:"minecraft:plains"},PersistenceRequired:1b}
-/summon minecraft:oak_boat ~2.5 ~2 ~5.7 {Passengers:[{id:"minecraft:zombie",Silent:1b,PersistenceRequired:1b}]}
+/summon minecraft:villager ~7.5 ~2 ~4.5 {VillagerData:{profession:"minecraft:fletcher",level:2,type:"minecraft:plains"},PersistenceRequired:1b}
+/summon minecraft:villager ~7.5 ~2 ~6.5 {VillagerData:{profession:"minecraft:fletcher",level:2,type:"minecraft:plains"},PersistenceRequired:1b}
+/summon minecraft:villager ~9.5 ~2 ~5.5 {VillagerData:{profession:"minecraft:fletcher",level:2,type:"minecraft:plains"},PersistenceRequired:1b}
+/summon minecraft:oak_boat ~2.5 ~1 ~5.7 {Passengers:[{id:"minecraft:zombie",Silent:1b,PersistenceRequired:1b}]}

@@ -4,14 +4,15 @@ const { Vec3 } = require('vec3')
 const primitives = require('../building/primitives')
 const placer = require('../building/placer')
 const session = require('../building/session')
-const { undoLastBuild } = require('../building/undo')
-const { loadSchematic, schematicToBlocks, listSchematics } = require('../building/schematic')
+const { undoLastBuild, removeBuild: undoRemoveBuild } = require('../building/undo')
+const { loadSchematic, schematicToBlocks, listSchematics, groundLayers } = require('../building/schematic')
 const llm = require('./llm')
 const style = require('./style')
 const plans = require('../plans')
 const pipeline = require('../pipeline')
 const inspector = require('../pipeline/inspector')
 const templates = require('../building/templates')
+const schematic = require('../building/schematic')
 const classify = require('../pipeline/classify')
 const { configureMovements, isKnownBlock } = require('../bot')
 const commander = require('../building/commander')
@@ -57,6 +58,7 @@ function register (bot) {
         case '!stop': return stop(bot)
         case '!resetbuild': return resetBuild(bot)
         case '!undo': return await undo(bot)
+        case '!remove': case '!clear': return await remove(bot, args, username)
         case '!schem': return await schem(bot, args, username)
         case '!style': return showStyle(bot)
         case '!remember': return remember(bot, args[1])
@@ -84,7 +86,8 @@ function say (bot, text) {
 }
 
 function help (bot) {
-  say(bot, 'Shapes: house floor wall box sphere cylinder cone pyramid gable arch stairs spiral. Also !make <description>, !schem <name>, !dry, !undo, !stop')
+  say(bot, 'Shapes: house floor wall box sphere cylinder cone pyramid gable arch stairs spiral. Also !make <description>, !schem <name>, !dry, !undo, !remove, !stop')
+  say(bot, 'Blueprints: !build /house1 (or /statue1, /colosseum...) places a downloaded build. !build /list shows them all. Add "at x y z" to choose the corner.')
   say(bot, 'Machines: !template list | !template place <name> | !export <name> at two corners to capture one that works.')
   say(bot, 'Teach me: !remember <name> keeps the last !make as an example to build like. !style shows what I have learned. !forget <name> drops one.')
 }
@@ -155,8 +158,167 @@ async function undo (bot) {
 // ---------------------------------------------------------------------------
 // Primitive builds.
 // ---------------------------------------------------------------------------
+// The block the requester is looking at: raycast from their eyes along their
+// facing until a solid block, and return the cell ON TOP of it - the natural
+// place to stand a build. Null if they are looking at sky, or their look data
+// has not arrived yet, in which case the caller falls back to a ground search.
+function crosshairTarget (bot, requester, maxDist = 128) {
+  const p = bot.players[requester]
+  if (!p || !p.entity) return null
+  const e = p.entity
+  if (typeof e.yaw !== 'number' || typeof e.pitch !== 'number') return null
+  const eye = e.position.offset(0, 1.62, 0)
+  // mineflayer's own view vector (plugins/blocks getViewDirection): yaw and
+  // pitch are radians, pitch POSITIVE looking up. Getting either sign wrong
+  // sends the ray into the sky, the raycast finds nothing, and the build
+  // silently falls back to the ground search - which is what it did first try.
+  const cp = Math.cos(e.pitch)
+  const dir = new Vec3(-Math.sin(e.yaw) * cp, Math.sin(e.pitch), -Math.cos(e.yaw) * cp)
+  let steps = 0
+  for (let d = 0.2; d <= maxDist; d += 0.2) {
+    const pt = eye.plus(dir.scaled(d))
+    const bp = new Vec3(Math.floor(pt.x), Math.floor(pt.y), Math.floor(pt.z))
+    const b = bot.blockAt(bp)
+    if (b === null) { if (++steps > 8) return null; continue }
+    steps = 0
+    if (b.boundingBox === 'block') return new Vec3(bp.x, bp.y + 1, bp.z)
+  }
+  return null
+}
+
+// !remove - take a whole placed structure back out and restore what it covered.
+// With no argument it removes the build the player is standing in (or looking
+// at); "!remove list" shows them; "!remove last" or "!remove <name>" pick one.
+async function remove (bot, args, requester) {
+  if (state.building) return say(bot, 'Busy building - !stop first.')
+  const arg = (args[1] || '').toLowerCase()
+  const all = session.builds().filter(b => b.count)
+
+  if (arg === 'list') {
+    if (!all.length) return say(bot, 'Nothing recorded to remove.')
+    return sayList(bot, 'Removable:', all.slice().reverse().map(b => `${b.label} (${b.count})`))
+  }
+  if (!all.length) return say(bot, 'Nothing recorded to remove.')
+
+  let target
+  if (!arg) {
+    const p = bot.players[requester]
+    const look = crosshairTarget(bot, requester)
+    const spot = look || (p && p.entity && p.entity.position.floored())
+    if (spot) target = session.buildAt(spot.x, spot.z)
+    if (!target) return say(bot, "Stand in (or look at) the build you want gone, or use !remove list then !remove <name>.")
+  } else if (arg === 'last') {
+    target = all[all.length - 1]
+  } else {
+    const matches = all.filter(b => b.label.toLowerCase().includes(arg))
+    if (!matches.length) return say(bot, `No build matches "${arg}". Try !remove list.`)
+    target = matches[matches.length - 1]
+  }
+
+  const build = session.getBuildById(target.id)
+  if (!build) return say(bot, 'That build is no longer in the log.')
+
+  state.building = true
+  state.cancelled = false
+  say(bot, `Removing "${build.label}" - ${build.blocks.length} blocks.`)
+  try {
+    const stats = await undoRemoveBuild(bot, build, {
+      onProgress: (i, t) => say(bot, `...removed ${i}/${t}`),
+      shouldCancel: () => state.cancelled
+    })
+    if (!stats) return say(bot, "The removal fills did nothing - is the bot op?")
+    if (stats.nothing) return say(bot, 'That build had no blocks recorded.')
+    const parts = [`${stats.removed} removed`]
+    if (stats.restored) parts.push(`${stats.restored} of the old terrain put back`)
+    if (stats.changed) parts.push(`${stats.changed} left alone (changed since)`)
+    if (stats.remaining) parts.push(`${stats.remaining} stuck`)
+    say(bot, `Done: ${parts.join(', ')}.${stats.remaining ? ' Run !remove again to retry the rest.' : ''}`)
+    if (stats.destroyed && stats.destroyed.size) say(bot, `Couldn't give back what it had dug out: ${[...stats.destroyed].join(', ')}.`)
+  } finally {
+    state.building = false
+  }
+}
+
+// Trailing "at <x> <y> <z>" on any placement command. Returns { args, at }
+// with the clause removed. Coordinates may be ~ (player position).
+function parseAt (args, bot, requester) {
+  const i = args.findIndex(a => a.toLowerCase() === 'at')
+  if (i === -1 || args.length < i + 4) return { args, at: null }
+  const player = bot.players[requester]
+  const base = player && player.entity ? player.entity.position.floored() : bot.entity.position.floored()
+  const num = (raw, b) => {
+    if (raw.startsWith('~')) return b + (raw.length > 1 ? parseInt(raw.slice(1), 10) : 0)
+    return parseInt(raw, 10)
+  }
+  const at = new Vec3(num(args[i + 1], base.x), num(args[i + 2], base.y), num(args[i + 3], base.z))
+  if ([at.x, at.y, at.z].some(v => !Number.isFinite(v))) return { args, at: null, error: 'Usage: ... at <x> <y> <z>' }
+  return { args: [...args.slice(0, i), ...args.slice(i + 4)], at }
+}
+
+// !build /house1 - a friendly name from schematics/aliases.json, so nobody has
+// to remember that the cherry cottage is 31257.litematic. Re-read on every
+// call: the file is meant to be edited by hand while the bot runs.
+function loadAliases () {
+  const aliases = JSON.parse(require('fs').readFileSync(require('path').join(schematic.SCHEMATIC_DIR, 'aliases.json'), 'utf8'))
+  return { aliases, names: Object.keys(aliases).filter(k => !k.startsWith('_')) }
+}
+
+function resolveAlias (word) {
+  if (!word || !word.startsWith('/')) return null
+  const key = word.slice(1).toLowerCase()
+  let aliases, names
+  try {
+    ({ aliases, names } = loadAliases())
+  } catch (err) {
+    return { error: `Couldn't read aliases.json: ${err.message}` }
+  }
+  if (!aliases[key]) return { error: `No blueprint called "${key}". I have: ${names.map(n => '/' + n).join(' ')}` }
+  return { file: aliases[key], names }
+}
+
+// !build menu - everything the bot can do right now, in one place. Chat lines
+// cap at 256 characters, so long lists are broken across several messages.
+function sayList (bot, prefix, items) {
+  let line = prefix
+  for (const item of items) {
+    if ((line + ' ' + item).length > 240) { say(bot, line); line = '   ' + item } else line += ' ' + item
+  }
+  say(bot, line)
+}
+
+function buildMenu (bot) {
+  let blueprints = []
+  try { blueprints = loadAliases().names } catch (err) { say(bot, `Couldn't read aliases.json: ${err.message}`) }
+  const machines = templates.list()
+  say(bot, 'BUILD MENU')
+  say(bot, 'Shapes: !build <shape> <sizes> <block> - house floor wall box sphere cylinder cone pyramid gable arch stairs spiral')
+  if (blueprints.length) sayList(bot, 'Blueprints: !build', blueprints.map(n => '/' + n))
+  else say(bot, 'Blueprints: none yet - drop a .schem or .litematic into schematics/ and name it in aliases.json')
+  if (machines.length) sayList(bot, 'Machines: !template place', machines)
+  say(bot, 'Describe: !make <anything in plain English>   Teach: !remember <name>, !style, !forget <name>')
+  say(bot, 'Control: !dry on|off (preview only), !stop, !undo, !remove (the build you stand in / !remove list), !resetbuild, !help')
+}
+
 async function build (bot, args, requester) {
+  const parsed = parseAt(args, bot, requester)
+  if (parsed.error) return say(bot, parsed.error)
+  args = parsed.args
+  const at = parsed.at
   const shape = args[1]
+
+  if (!shape || shape.toLowerCase() === 'menu' || shape.toLowerCase() === 'help') return buildMenu(bot)
+
+  if (shape && shape.startsWith('/')) {
+    if (shape.toLowerCase() === '/list') {
+      try { return sayList(bot, 'Blueprints: !build', loadAliases().names.map(n => '/' + n)) } catch (err) { return say(bot, `Couldn't read aliases.json: ${err.message}`) }
+    }
+    const hit = resolveAlias(shape)
+    if (hit.error) return say(bot, hit.error)
+    // "template:iron_farm" points at a machine template (blocks + setup
+    // script); anything else is a schematic file in schematics/.
+    if (hit.file.startsWith('template:')) return await placeTemplate(bot, hit.file.slice('template:'.length), requester, at)
+    return await schem(bot, ['!schem', hit.file], requester, at)
+  }
   const material = m => (isKnownBlock(bot, m) ? m : null)
 
   let blocks
@@ -260,7 +422,8 @@ async function build (bot, args, requester) {
 // ---------------------------------------------------------------------------
 // Schematics.
 // ---------------------------------------------------------------------------
-async function schem (bot, args, requester) {
+async function schem (bot, args, requester, at = null) {
+  if (!at) { const parsed = parseAt(args, bot, requester); if (parsed.error) return say(bot, parsed.error); args = parsed.args; at = parsed.at }
   const name = args[1]
 
   if (!name || name === 'list') {
@@ -279,9 +442,14 @@ async function schem (bot, args, requester) {
   const { blocks, size, skipped } = schematicToBlocks(loaded)
   if (!blocks.length) return say(bot, `"${name}" has no non-air blocks.`)
   if (skipped) say(bot, `(${skipped} blocks in the file couldn't be read - skipping those.)`)
-  say(bot, `${name}: ${size.width}x${size.height}x${size.depth}, ${blocks.length} blocks. Orientation of stairs/doors won't survive - the bot can only place plain blocks.`)
+  say(bot, `${name}: ${size.width}x${size.height}x${size.depth}, ${blocks.length} blocks.`)
 
-  await runBuild(bot, blocks, `schematic ${name}`, requester)
+  // Terrain the author captured along with the build goes INTO the ground,
+  // not on top of it - see groundLayers.
+  const ground = groundLayers(loaded)
+  if (ground) say(bot, `The bottom ${ground === 1 ? 'layer is' : `${ground} layers are`} terrain - sinking it ${ground} so it sits at ground level.`)
+
+  await runBuild(bot, blocks, `schematic ${name}`, requester, undefined, undefined, ground, at)
 }
 
 // ---------------------------------------------------------------------------
@@ -511,13 +679,13 @@ async function exportTemplate (bot, name, requester) {
 async function template (bot, args, requester) {
   const verb = args[1]
   if (!verb || verb === 'list') return templateList(bot)
-  if (verb === 'place') return await placeTemplate(bot, args[2], requester)
+  if (verb === 'place') { const parsed = parseAt(args, bot, requester); if (parsed.error) return say(bot, parsed.error); return await placeTemplate(bot, parsed.args[2], requester, parsed.at) }
   if (verb === 'import') return say(bot, `Use !export ${args[2] || '<name>'} at two opposite corners - that is the import.`)
   say(bot, 'Usage: !template list | !template place <name>')
 }
 
-async function placeTemplate (bot, name, requester) {
-  if (!name) return say(bot, 'Usage: !template place <name>')
+async function placeTemplate (bot, name, requester, at = null) {
+  if (!name) return say(bot, 'Usage: !template place <name> [at <x> <y> <z>]')
   if (state.building) return say(bot, 'Already building - say !stop first.')
 
   let info
@@ -532,7 +700,24 @@ async function placeTemplate (bot, name, requester) {
   if (skipped) say(bot, `(${skipped} blocks in the file could not be read.)`)
 
   say(bot, `Placing ${name}: ${blocks.length} blocks.`)
-  const origin = await runBuild(bot, blocks, `template ${name}`, requester, null)
+  // meta.ground: how many bottom layers of the template are the ground it was
+  // captured in. They go INTO the terrain, not on top of it.
+  const ground = Number(info.meta.ground) || 0
+  const origin = await runBuild(bot, blocks, `template ${name}`, requester, null, undefined, ground, at)
+
+  // Shovel the ground around it - see templates.surfaceBlocks. After the
+  // blocks and before the entities. Its own entry in the undo log: one !undo
+  // takes the paths back, the next takes the farm.
+  if (state.lastOrigin && !state.dryRun && info.meta.surface) {
+    const paths = templates.surfaceBlocks(bot, info, state.lastOrigin)
+    if (paths.length) {
+      const m = info.meta.surface
+      say(bot, `Shovelling the ground ${m.margin} blocks out on every side to ${m.block || 'dirt_path'} - ${paths.length} blocks.`)
+      const stats = await commander.fillStructure(bot, state.lastOrigin, paths, { label: `template ${name} surface` })
+      if (!stats) say(bot, 'The surface pass did nothing - is the bot op?')
+      else say(bot, `Shovelled ${stats.placed} blocks${stats.failed ? `, ${stats.failed} did not change` : ''}.`)
+    }
+  }
 
   // The blocks are only half of a working machine.
   if (info.setup.length && state.lastOrigin) {
@@ -552,7 +737,15 @@ async function placeTemplate (bot, name, requester) {
 // ---------------------------------------------------------------------------
 // Shared build runner: origin, material check, dry-run, execution, reporting.
 // ---------------------------------------------------------------------------
-async function runBuild (bot, blocks, label, requester, buildRun, treads) {
+// `sink` lowers the origin that many blocks into the ground. Templates carry
+// their own ground layers (an exported farm includes the dirt its floor sits
+// in), and without this those layers stack on top of the natural grass and
+// the whole build stands two blocks proud of the terrain.
+// `at` (Vec3) skips the site search and puts the build's min corner exactly
+// there. Two uses: the player chose the spot ("!build /house1 at 100 64 -20"),
+// and repairing a build in place - re-running the same file at the same origin
+// fills only what is missing, because fillStructure skips correct cells.
+async function runBuild (bot, blocks, label, requester, buildRun, treads, sink = 0, at = null) {
   if (state.building) return say(bot, 'Already building - say !stop first.')
   if (blocks.length > MAX_BLOCKS) {
     return say(bot, `That's ${blocks.length} blocks, over the ${MAX_BLOCKS} cap.`)
@@ -585,15 +778,28 @@ async function runBuild (bot, blocks, label, requester, buildRun, treads) {
   // every later build lands inside the last. The saved origin also has to still
   // be near the player, or a resume drags the build back across the map.
   let origin = session.loadOrigin()
-  if (origin && commander.nearEnough(origin, here)) {
+  const footprint = placer.footprintOf(blocks)
+
+  // Where the build's floor corner lands. Priority: an explicit "at x y z",
+  // then the block the requester is looking at (their crosshair), then - only
+  // if they are looking at open sky - the old nearby-clear-ground search.
+  let baseCorner = at ? at.clone() : null
+  if (!baseCorner && requester) {
+    const look = crosshairTarget(bot, requester)
+    if (look) { baseCorner = look; say(bot, `Building where you're looking, (${look.x}, ${look.y}, ${look.z}).`) }
+  }
+
+  if (baseCorner) {
+    origin = baseCorner.offset(-footprint.lo.x, -footprint.lo.y - sink, -footprint.lo.z)
+    session.saveOrigin(origin)
+  } else if (origin && commander.nearEnough(origin, here)) {
     say(bot, 'Resuming the build I was interrupted on.')
   } else {
     // Find ground that is not already built on. The old behaviour - player
     // position plus two - meant building twice from one spot put the second
     // build inside the first.
-    const footprint = placer.footprintOf(blocks)
     const site = placer.findSite(bot, here, footprint)
-    origin = site.origin.offset(-footprint.lo.x, -footprint.lo.y, -footprint.lo.z)
+    origin = site.origin.offset(-footprint.lo.x, -footprint.lo.y - sink, -footprint.lo.z)
 
     if (site.ring === -1) {
       say(bot, `Couldn't find ${footprint.width}x${footprint.depth} of clear ground nearby - building beside you anyway, it may overlap something.`)

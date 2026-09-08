@@ -193,7 +193,9 @@ check('planToBlocks refuses a plan over the block cap', () => {
     // Distinct offsets on purpose: identical actions are deduplicated by
     // validatePlan (a shape re-emitted after a carve seals it), so ten copies
     // of one box collapse to a single box and stop testing the cap at all.
-    actions: Array.from({ length: 10 }, (_, i) => ({
+    // 20 solid 32-cubes is 655k blocks - over the cap whatever MC_MAX_BLOCKS
+    // is set to in compose (500k as of 2026-09-06, up from the 150k default).
+    actions: Array.from({ length: 20 }, (_, i) => ({
       op: 'box', material: 'stone', offset: { x: i * 40, y: 0, z: 0 }, width: 32, depth: 32, height: 32, hollow: false
     }))
   }, isKnown)

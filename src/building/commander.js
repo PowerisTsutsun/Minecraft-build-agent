@@ -126,6 +126,79 @@ function anyLanded (bot, cells, want) {
   })
 }
 
+// /fill refuses anything over 32768 blocks. toBoxes is greedy and a big solid
+// schematic can hand it a slab of planks well past that, which the server
+// answers with "too many blocks" and the whole box reads back as failed.
+const ATTACHABLE = /^(torch|wall_torch|soul_torch|soul_wall_torch|redstone_torch|redstone_wall_torch|redstone_wire|comparator|repeater|lever|.*_button|.*_pressure_plate|tripwire|tripwire_hook|rail|powered_rail|detector_rail|activator_rail|.*_sign|.*_banner|.*_carpet|moss_carpet|ladder|vine|.*_vines|bell|lantern|soul_lantern|.*_chain|iron_chain|.*_hanging_sign|item_frame|painting|snow|.*_candle|candle|flower_pot|potted_.*|.*_door|.*_trapdoor|.*_fence_gate|scaffolding|lily_pad|.*_coral_fan|.*_coral_wall_fan|sea_pickle|bamboo|sugar_cane|cactus|.*_sapling|short_grass|tall_grass|fern|large_fern|dead_bush|.*_flower|dandelion|poppy|.*_tulip|azure_bluet|oxeye_daisy|cornflower|lily_of_the_valley|wither_rose|torchflower|pink_petals|small_dripleaf|big_dripleaf|.*_mushroom|cave_vines.*|glow_lichen|sculk_vein|pointed_dripstone|amethyst_cluster|.*_amethyst_bud|redstone_lamp|lightning_rod|end_rod|.*_head|.*_skull|bubble_column|water|lava|kelp.*|seagrass|tall_seagrass)$/
+const FILL_MAX = 32768
+function splitBox (box) {
+  const dx = box.max.x - box.min.x + 1
+  const dy = box.max.y - box.min.y + 1
+  const dz = box.max.z - box.min.z + 1
+  if (dx * dy * dz <= FILL_MAX) return [box]
+  // Cut along the longest axis and recurse.
+  const axis = dx >= dy && dx >= dz ? 'x' : (dy >= dz ? 'y' : 'z')
+  const mid = Math.floor((box.min[axis] + box.max[axis]) / 2)
+  const a = { ...box, min: box.min.clone(), max: box.max.clone() }
+  const b = { ...box, min: box.min.clone(), max: box.max.clone() }
+  a.max[axis] = mid
+  b.min[axis] = mid + 1
+  return [...splitBox(a), ...splitBox(b)]
+}
+
+// Block until the client actually holds world data for a spread of the target
+// cells (or we give up). Sampling beats checking all of them: a few dozen
+// cells spread across the footprint prove the chunks arrived, and cost
+// nothing next to reading 300k.
+const WORLD_WAIT_MAX_TICKS = 400
+async function waitForWorld (bot, keys, samples = 40) {
+  if (!keys.length) return true
+  const step = Math.max(1, Math.floor(keys.length / samples))
+  const probe = []
+  for (let i = 0; i < keys.length; i += step) probe.push(parseKey(keys[i]))
+
+  for (let waited = 0; waited < WORLD_WAIT_MAX_TICKS; waited += 10) {
+    const missing = probe.filter(([x, y, z]) => !bot.blockAt(new Vec3(x, y, z))).length
+    if (!missing) return true
+    await bot.waitForTicks(10)
+  }
+  const missing = probe.filter(([x, y, z]) => !bot.blockAt(new Vec3(x, y, z))).length
+  console.error(`[fill] gave up waiting for world data - ${missing}/${probe.length} sample cells still empty`)
+  return false
+}
+
+// The order fills are sent in. Everything is /fill, so this is the only lever
+// we have over what exists when: a block placed into a cell that is not ready
+// for it either pops off or gets pushed around, and nothing reports it.
+//
+//   0 inert solids      the shell and everything that can hold a state
+//   1 mechanisms        pistons, droppers, hoppers, observers - solids that ACT
+//   2 attachables       torches, rails, dust, plants - need a face to sit on
+//   3 power             redstone_block, levers, buttons, plates - things that
+//                       would fire a mechanism placed after them
+//   4 liquids           water and lava, placed last so they cannot flow into a
+//                       cell before the block that belongs there arrives. A
+//                       sorter placed with water in the same phase as its dust
+//                       lost the dropper circuit to a sheet of water at y62 -
+//                       three cells, silently, and the whole deposit path died.
+//   5 portals           nether_portal needs its obsidian frame standing first;
+//                       277,499 of them vanished the one time it did not.
+//
+// Order within a phase is stable (the caller sorts on the original index).
+const MECHANISM = /^(piston|sticky_piston|moving_piston|observer|dispenser|dropper|crafter|hopper|note_block|tnt|redstone_lamp|target|jukebox|bell)$/
+const POWER = /^(redstone_block|lever|.*_button|.*_pressure_plate|redstone_torch|redstone_wall_torch|daylight_detector|sculk_sensor|calibrated_sculk_sensor|lightning_rod|tripwire_hook)$/
+const LIQUID = /^(water|lava|bubble_column)$/
+
+function phaseOf (name) {
+  const base = baseName(name)
+  if (base === 'nether_portal') return 5
+  if (LIQUID.test(base)) return 4
+  if (POWER.test(base)) return 3
+  if (ATTACHABLE.test(base)) return 2
+  if (MECHANISM.test(base)) return 1
+  return 0
+}
+
 function fillCommand (box) {
   const { min, max, name } = box
   return `/fill ${min.x} ${min.y} ${min.z} ${max.x} ${max.y} ${max.z} minecraft:${name} replace`
@@ -243,6 +316,17 @@ async function fillStructure (bot, origin, blocks, opts = {}) {
     cells.set(key(t.x, t.y, t.z), name)
   }
 
+  // Force-load the whole footprint and WAIT for the chunks to actually reach
+  // this client BEFORE reading a single cell. The scan below and the probe
+  // both use bot.blockAt, which answers null for a chunk the client has not
+  // received - and a teleport only buys ~300ms. Rebuilding the gold farm from
+  // across the map, 120,423 of 306,397 cells read as "no world data", the
+  // probe fill could not be verified, and a working command build fell back to
+  // walking (2026-09-06). Loading first costs a second and removes the whole
+  // class of failure.
+  const region = await forceloadAdd(bot, [...cells.keys()])
+  await waitForWorld(bot, [...cells.keys()])
+
   // Anything already correct is skipped rather than refilled, so a re-run over
   // an existing build reports honestly instead of claiming to rebuild it.
   const todo = new Map()
@@ -259,9 +343,23 @@ async function fillStructure (bot, origin, blocks, opts = {}) {
   if (unknownWorld) {
     console.error(`[fill] ${unknownWorld} target cells have no world data - chunks may not be loaded`)
   }
-  if (!todo.size) return stats
+  if (!todo.size) { forceloadRemove(bot, region); return stats }
 
-  const boxes = toBoxes(todo)
+  // Placement order matters for two kinds of block. Anything that needs a
+  // support or a frame gets removed by the server the instant it is placed
+  // without one - and /fill runs its neighbour updates immediately, so a
+  // torch, comparator or portal block set before the block it sits on is
+  // simply gone. toBoxes already goes bottom-up, which covers most support
+  // cases, but not same-layer ones (comparator beside its wall) and not
+  // portals, whose obsidian frame is finished several layers ABOVE them: the
+  // gold farm (27169) lost 277,499 of 306,399 blocks that way on 2026-09-06.
+  // So: solid blocks first, attachables second, portals last.
+  // Ordering lives in phaseOf() above - one definition for every fill path.
+  const phase = phaseOf
+  const boxes = toBoxes(todo).flatMap(splitBox)
+    .map((b, i) => ({ b, i, p: phase(b.name) }))
+    .sort((u, v) => u.p - v.p || u.i - v.i)
+    .map(o => o.b)
   const totalCells = todo.size
   console.log(`[fill] ${label}: ${totalCells} blocks as ${boxes.length} fill command${boxes.length === 1 ? '' : 's'}`)
 
@@ -269,7 +367,6 @@ async function fillStructure (bot, origin, blocks, opts = {}) {
 
   // One write at the end rather than one per 25 blocks - see session.js.
   session.setBuffering(true)
-  const region = await forceloadAdd(bot, [...todo.keys()])
 
   try {
     // ONE command first, and wait for it. If this bot is not op the fill does
@@ -288,15 +385,38 @@ async function fillStructure (bot, origin, blocks, opts = {}) {
     // command in turn is what a first draft does and it gives the entire win
     // back: a radius-6 sphere is 114 fills, and at one 300ms settle apiece
     // that is 34 seconds to do work the server finishes in a single tick.
+    //
+    // ...up to a point. A 320k-block schematic is 68,000 fill commands, and
+    // shoving those down the socket in one synchronous loop starves the
+    // client's own keepalive replies: the server dropped BuilderBot with a
+    // keepalive timeout two minutes in (2026-09-06) and the build died with
+    // it. So: bursts of BURST commands, then yield a couple of ticks so the
+    // keepalive - and the server - get a word in. Small builds never notice.
+    const BURST = 100
+    const BURST_PAUSE_TICKS = 2
     for (let i = 1; i < boxes.length; i++) {
       if (shouldCancel && shouldCancel()) { stats.cancelled = true; break }
       bot.chat(fillCommand(boxes[i]))
+      if (i % BURST === 0) {
+        await bot.waitForTicks(BURST_PAUSE_TICKS)
+        if (onProgress && i % (BURST * 100) === 0) onProgress(Math.round(totalCells * i / boxes.length), totalCells)
+      }
     }
 
     // Block updates for a big burst arrive over several ticks. Verify, then
     // give anything still unconfirmed another look rather than calling it
     // failed - a slow packet and a rejected command look identical for the
     // first few ticks and only one of them is a problem.
+    //
+    // How long "several ticks" is scales with the burst. 820 fill commands
+    // covering 300k cells produce a flood of block-change packets, and a fixed
+    // settle read the client's stale world: the gold farm reported 240,786 of
+    // 306,397 blocks FAILED while the server had placed essentially all of
+    // them (2026-09-06). Wait proportionally before believing the world.
+    const settleTicks = Math.min(600, CMD_SETTLE_TICKS * VERIFY_ROUNDS + Math.floor(boxes.length / 4))
+    if (settleTicks > CMD_SETTLE_TICKS * VERIFY_ROUNDS) {
+      await bot.waitForTicks(settleTicks - CMD_SETTLE_TICKS * VERIFY_ROUNDS)
+    }
     let pending = [...todo.keys()]
     for (let round = 0; round < VERIFY_ROUNDS && pending.length; round++) {
       await bot.waitForTicks(CMD_SETTLE_TICKS)
@@ -369,30 +489,35 @@ async function restore (bot, entries, opts = {}) {
   const stats = { removed: 0, changed: 0, failed: 0, restored: 0, destroyed: new Set(), mode: 'command' }
 
   const cells = new Map()
-  const undone = []
+  const toFill = []
 
   for (const entry of entries) {
     const pos = new Vec3(entry.x, entry.y, entry.z)
     const current = bot.blockAt(pos)
 
+    // What we placed here, compared the only way that works: by base name.
+    // The undo log stores the full spec ("cherry_stairs[facing=north,...]")
+    // while blockAt reports the plain id, so comparing the two raw strings
+    // made EVERY stateful block look like someone else's later edit. Undo
+    // then skipped it as "changed since" and left it standing - which is why
+    // rolling a schematic back used to leave most of it in the world.
+    const want = baseName(entry.placed)
+
     if (!current) { stats.failed++; continue }
-    if (current.name === 'air' && entry.placed !== 'air') {
+    if (current.name === 'air' && want !== 'air') {
       // already gone - nothing to roll back, but it leaves the log
-      undone.push(entry)
       stats.removed++
       continue
     }
-    if (current.name !== entry.placed) {
+    if (current.name !== want) {
       // changed by someone else since - leave it exactly alone
       stats.changed++
-      undone.push(entry)
       continue
     }
 
     const back = (!entry.previous || entry.previous === 'unknown') ? 'air' : entry.previous
     cells.set(key(entry.x, entry.y, entry.z), back)
-    if (back !== 'air') stats.restored++
-    undone.push(entry)
+    toFill.push(entry)
   }
 
   if (cells.size) {
@@ -407,35 +532,45 @@ async function restore (bot, entries, opts = {}) {
       return null
     }
 
+    // Bursts with a breather, for the keepalive reason in fillStructure: a
+    // big rollback is as many commands as the build was.
+    const BURST = 100
+    const BURST_PAUSE_TICKS = 2
     for (let i = 1; i < boxes.length; i++) {
       if (shouldCancel && shouldCancel()) { stats.cancelled = true; break }
       bot.chat(fillCommand(boxes[i]))
+      if (i % BURST === 0) {
+        await bot.waitForTicks(BURST_PAUSE_TICKS)
+      }
     }
     await bot.waitForTicks(CMD_SETTLE_TICKS * VERIFY_ROUNDS)
 
     // Count what actually reverted, and hand back anything that did not so a
-    // second !undo can retry exactly those.
+    // second pass can retry exactly those.
     const stuck = []
-    for (const entry of undone) {
+    for (const entry of toFill) {
       const pos = new Vec3(entry.x, entry.y, entry.z)
       const now = bot.blockAt(pos)
       if (now && now.name === baseName(entry.placed)) {
         stats.failed++
-        stats.removed--
         stuck.push(entry)
+        continue
       }
+      stats.removed++
+      const back = cells.get(key(entry.x, entry.y, entry.z))
+      if (back && back !== 'air') stats.restored++
     }
     // Same honest availability test as fillStructure: if not one cell reverted,
     // the fills did nothing and this bot cannot roll back by command.
-    if (stuck.length === cells.size) {
+    if (stuck.length === toFill.length) {
       console.error('[fill] undo fills changed nothing - not op, or chunks unloaded.')
       return null
     }
-    stats.removed += cells.size - stuck.length
     stats.stuck = stuck
   }
 
   return stats
 }
 
-module.exports = { fillStructure, restore, toBoxes, boxCells, fillCommand, forceloadAdd, forceloadRemove, teleportTo, teleportToPlayer, nearEnough }
+module.exports = {
+  phaseOf, MECHANISM, POWER, LIQUID, fillStructure, restore, toBoxes, splitBox, ATTACHABLE, FILL_MAX, boxCells, fillCommand, forceloadAdd, forceloadRemove, teleportTo, teleportToPlayer, nearEnough }

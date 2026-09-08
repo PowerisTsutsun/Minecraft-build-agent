@@ -1,0 +1,20 @@
+# "MY FARM GOLD AND AUTO CRAFT GOLD INGOT" by 17122014 (27169.litematic).
+# ~x ~y ~z are offsets from the template origin (min corner).
+#
+# No mobs to summon: zombified piglins spawn from the 259k portal blocks on
+# random ticks while a player is within simulation distance. Turtle eggs lure
+# them onto trapdoors, they drop into the water and the collection line.
+#
+# THE SORTER at x43..45, y13, z37 is three filter hoppers read by comparators;
+# everything they do not take goes round the y12 hopper ring to the droppers
+# at x46 and into the lava at (46,9,38) - that is where rotten flesh (and
+# golden swords, which cannot be filtered this way) is meant to end up.
+# The author's file carries no hopper contents, so unloaded filters sent the
+# gold to the lava too (2026-09-06). Middle column x44 feeds the crafter
+# (44,9,39) via the locked hopper at (44,10,39), so it is the nugget filter.
+# x43 and x45 are both loaded for gold ingots - the rare direct drop - because
+# nothing else stackable and worth keeping comes out of a zombified piglin.
+# Sticks are the junk: a piglin never drops one.
+/data merge block ~43 ~13 ~37 {Items:[{Slot:0b,id:"minecraft:gold_ingot",count:41},{Slot:1b,id:"minecraft:stick",count:1},{Slot:2b,id:"minecraft:stick",count:1},{Slot:3b,id:"minecraft:stick",count:1},{Slot:4b,id:"minecraft:stick",count:1}]}
+/data merge block ~44 ~13 ~37 {Items:[{Slot:0b,id:"minecraft:gold_nugget",count:41},{Slot:1b,id:"minecraft:stick",count:1},{Slot:2b,id:"minecraft:stick",count:1},{Slot:3b,id:"minecraft:stick",count:1},{Slot:4b,id:"minecraft:stick",count:1}]}
+/data merge block ~45 ~13 ~37 {Items:[{Slot:0b,id:"minecraft:gold_ingot",count:41},{Slot:1b,id:"minecraft:stick",count:1},{Slot:2b,id:"minecraft:stick",count:1},{Slot:3b,id:"minecraft:stick",count:1},{Slot:4b,id:"minecraft:stick",count:1}]}

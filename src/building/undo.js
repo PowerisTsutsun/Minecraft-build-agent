@@ -164,6 +164,55 @@ async function undoLastBuild (bot, opts = {}) {
   return stats
 }
 
+// Remove ONE named build (not just the last), restoring what it overwrote.
+// Command-mode only: the whole build's footprint is force-loaded, then its
+// blocks are handed to commander.restore in chunks - the same fill-back the
+// last-build undo uses, just aimed at any build in the log. Returns null if
+// the bot cannot fill (not op), so the caller can say so.
+async function removeBuild (bot, build, opts = {}) {
+  const { onProgress, shouldCancel } = opts
+  if (!build || !build.blocks.length) return { nothing: true }
+  if (BUILD_MODE === 'survival') return null
+
+  const bounds = session.buildBounds(build)
+  const keys = []
+  for (let x = bounds.lo.x; x <= bounds.hi.x; x++) {
+    for (let z = bounds.lo.z; z <= bounds.hi.z; z++) keys.push(`${x},${bounds.lo.y},${z}`)
+  }
+  const region = await commander.forceloadAdd(bot, keys)
+
+  const stats = { removed: 0, changed: 0, failed: 0, restored: 0, destroyed: new Set(), total: build.blocks.length }
+  const stuckAll = []
+  try {
+    // Top-down: same reason as undo - never strand the bot over a hole, and
+    // let supports outlast what rests on them until the end.
+    const ordered = build.blocks.slice().reverse()
+    const CHUNK = 4000
+    for (let i = 0; i < ordered.length; i += CHUNK) {
+      if (shouldCancel && shouldCancel()) { stats.cancelled = true; break }
+      const batch = ordered.slice(i, i + CHUNK)
+      await commander.teleportTo(bot, new Vec3(batch[0].x, batch[0].y + 1, batch[0].z))
+      const cmd = await commander.restore(bot, batch, { shouldCancel })
+      if (!cmd) { commander.forceloadRemove(bot, region); return null }
+      stats.removed += cmd.removed || 0
+      stats.changed += cmd.changed || 0
+      stats.failed += cmd.failed || 0
+      stats.restored += cmd.restored || 0
+      for (const d of (cmd.destroyed || [])) stats.destroyed.add(d)
+      for (const e of (cmd.stuck || [])) stuckAll.push(e)
+      if (onProgress) onProgress(Math.min(i + CHUNK, ordered.length), ordered.length)
+    }
+  } finally {
+    commander.forceloadRemove(bot, region)
+  }
+
+  const stuckKeys = new Set(stuckAll.map(entryKey))
+  const left = build.blocks.filter(b => stuckKeys.has(entryKey(b)))
+  session.updateBuildById(build.id, left)
+  stats.remaining = left.length
+  return stats
+}
+
 function entryKey (e) {
   return `${e.x},${e.y},${e.z},${e.placed}`
 }
@@ -197,4 +246,4 @@ async function settle (bot) {
   // whole rollback on one block.
 }
 
-module.exports = { undoLastBuild }
+module.exports = { undoLastBuild, removeBuild }

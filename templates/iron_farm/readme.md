@@ -1,6 +1,6 @@
 # iron_farm
 
-**No `.schem` yet — this template is a scaffold, not a working farm.**
+Captured 2026-09-06 from the farm at 1804 -62 993 on the sandbox (23 ingots in its chest).
 
 An iron farm is three villagers, a zombie they can see but not reach, three beds
 and three workstations, arranged so golems spawn on a platform and are swept into
@@ -38,3 +38,22 @@ stops working — which looks exactly like a farm that was never built right.
 - source:
 - tested on:
 - notes:
+
+## Why the ground gets shovelled
+
+Golems spawn anywhere within 8 blocks of the village centre, on any full block
+with air above it, so plain grass beside the walls grows golems outside the
+chamber. The by-hand fix is right-clicking the grass with a shovel: dirt path is
+a fifteen-sixteenths block and nothing spawns on it. The `surface` box in
+`meta.json` (`margin` 8, `block` dirt_path) does that to every column within 8
+blocks of the footprint after placement. The `.schem` cannot carry this - the
+original was captured with plain grass outside it.
+
+## Why `ground` is 1
+
+The template was re-captured on 2026-09-06 from the floor layer up, so layer 0
+is the dirt-path floor with the grass around it - the layer that stands in for
+the natural grass. `ground: 1` sinks the template one block at placement so that
+layer replaces the grass and the farm comes out flush with the terrain. The
+first capture (kept as `iron_farm.schem.2026-09-06-ground2.bak`) also had a full
+layer of dirt underneath and needed `ground: 2`.

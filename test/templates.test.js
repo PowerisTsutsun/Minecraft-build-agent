@@ -72,6 +72,20 @@ check('setup: relative offsets resolve against the placement origin',
 check('setup: the rest of the command is untouched',
   resolved[0].includes('{PersistenceRequired:1b}'))
 
+// Entities sit at fractional positions. The iron farm's boat is at ~2.5 ~2 ~5.7,
+// and an integer-only pattern passed that line through UNRESOLVED - so the bot
+// would have summoned the boat relative to its own feet, not the template.
+const boat = templates.setupCommands(
+  { setup: ['/summon minecraft:oak_boat ~2.5 ~2 ~5.7 {Passengers:[{id:"minecraft:zombie"}]}'] },
+  new Vec3(1908, -59, 1105))[0]
+check('setup: fractional offsets resolve too',
+  boat.includes('1910.5 -57 1110.7'), boat.slice(0, 60))
+check('setup: no unresolved ~ survives', !/~/.test(boat))
+// And the real template's setup must have nothing left unresolved either.
+const realSetup = templates.setupCommands(templates.describe('iron_farm'), new Vec3(0, 0, 0))
+check('iron_farm: every setup line resolves fully', realSetup.every(l => !/~/.test(l)),
+  realSetup.filter(l => /~/.test(l)).join(' | '))
+
 // --- the protect region ----------------------------------------------------
 const guarded = templates.protectedCells(fake, new Vec3(10, 0, 10))
 check('protect: covers the declared box',

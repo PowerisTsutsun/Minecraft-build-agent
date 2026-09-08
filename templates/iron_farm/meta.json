@@ -2,12 +2,12 @@
   "name": "iron_farm",
   "size": {
     "x": 14,
-    "y": 11,
+    "y": 10,
     "z": 11
   },
   "version": "26.1",
-  "exported": "2026-09-06T06:27:41.493Z",
-  "blocks": 628,
+  "exported": "2026-09-06T16:09:20.279Z",
+  "blocks": 477,
   "protect": {
     "from": {
       "x": 0,
@@ -16,29 +16,33 @@
     },
     "to": {
       "x": 13,
-      "y": 10,
+      "y": 9,
       "z": 10
     }
   },
   "notable": {
-    "water": 17,
+    "water": 18,
     "white_bed": 6,
     "chest": 2,
-    "hopper": 1,
-    "lava": 1,
-    "oak_wall_sign": 1
+    "lava": 2,
+    "hopper": 1
   },
   "needs": [
     "3 villagers",
-    "1 zombie with AI",
+    "1 zombie in a boat",
     "3 beds",
     "3 workstations"
   ],
   "produces": "iron ingots at the double chest",
-  "source": "captured from a working farm on the sandbox, verified with 23 iron ingots in its chest",
+  "ground": 1,
+  "surface": {
+    "margin": 8,
+    "block": "dirt_path"
+  },
+  "source": "re-captured 2026-09-06 from the copy at 1963 -61 1105 after widening the lava to two cells; floor layer up",
   "origin_was": {
-    "x": 1804,
-    "y": -62,
-    "z": 993
+    "x": 1963,
+    "y": -61,
+    "z": 1105
   }
 }

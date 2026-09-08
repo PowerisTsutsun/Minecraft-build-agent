@@ -173,12 +173,74 @@ function summary () {
   return log.builds.map(b => ({ id: b.id, label: b.label, count: b.blocks.length }))
 }
 
+// Bounds of a build's placed blocks, or null if it recorded none.
+function buildBounds (build) {
+  if (!build || !build.blocks.length) return null
+  const lo = { x: Infinity, y: Infinity, z: Infinity }
+  const hi = { x: -Infinity, y: -Infinity, z: -Infinity }
+  for (const b of build.blocks) {
+    lo.x = Math.min(lo.x, b.x); hi.x = Math.max(hi.x, b.x)
+    lo.y = Math.min(lo.y, b.y); hi.y = Math.max(hi.y, b.y)
+    lo.z = Math.min(lo.z, b.z); hi.z = Math.max(hi.z, b.z)
+  }
+  return { lo, hi }
+}
+
+// Every build still in the log, newest last, with bounds - for listing and for
+// finding the one a player is standing in.
+function builds () {
+  flush()
+  return loadLog().builds.map(b => ({ id: b.id, label: b.label, count: b.blocks.length, bounds: buildBounds(b) }))
+}
+
+function getBuildById (id) {
+  flush()
+  return loadLog().builds.find(b => b.id === id) || null
+}
+
+// Newest build whose horizontal footprint contains (x, z). Y is ignored so it
+// works whether the player stands inside, on top of, or at the foot of it.
+function buildAt (x, z) {
+  const all = builds().filter(b => b.bounds)
+  for (let i = all.length - 1; i >= 0; i--) {
+    const { lo, hi } = all[i].bounds
+    if (x >= lo.x && x <= hi.x && z >= lo.z && z <= hi.z) return all[i]
+  }
+  return null
+}
+
+function dropBuildById (id) {
+  flush()
+  const log = loadLog()
+  const before = log.builds.length
+  log.builds = log.builds.filter(b => b.id !== id)
+  if (log.builds.length !== before) writeJson(UNDO_FILE, log)
+}
+
+// Replace a specific build's blocks with what is left after a partial removal,
+// or drop it once empty.
+function updateBuildById (id, remainingBlocks) {
+  flush()
+  const log = loadLog()
+  const build = log.builds.find(b => b.id === id)
+  if (!build) return
+  if (remainingBlocks.length) build.blocks = remainingBlocks
+  else log.builds = log.builds.filter(b => b.id !== id)
+  writeJson(UNDO_FILE, log)
+}
+
 function clearLog () {
   pending = []
   try { fs.unlinkSync(UNDO_FILE) } catch (err) { /* nothing saved - fine */ }
 }
 
 module.exports = {
+  buildBounds,
+  builds,
+  getBuildById,
+  buildAt,
+  dropBuildById,
+  updateBuildById,
   UNDO_BATCH,
   loadOrigin,
   saveOrigin,
