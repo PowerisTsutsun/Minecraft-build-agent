@@ -21,6 +21,7 @@ const net = require('net')
 
 const TYPE_AUTH = 3
 const FRAGMENT = 4096   // vanilla's per-packet response payload cap
+const MAX_PACKET = 4 * 1024 * 1024   // sanity bound on a length read off the wire
 const TYPE_COMMAND = 2
 
 class Rcon {
@@ -29,7 +30,10 @@ class Rcon {
     this.port = port
     // rcon-servers.json may say "${RCON_PASSWORD}" so the secret stays in .env.
     const env = /^\$\{(\w+)\}$/.exec(password || '')
-    this.password = env ? (process.env[env[1]] || '') : password
+    if (env && !process.env[env[1]]) {
+      throw new Error(`rcon-servers.json wants ${password} but ${env[1]} is not set in the environment`)
+    }
+    this.password = env ? process.env[env[1]] : password
     this.timeout = timeout
     this.socket = null
     this.nextId = 1
@@ -44,7 +48,12 @@ class Rcon {
       this.socket.once('error', reject)
       this.socket.on('data', chunk => this._onData(chunk))
       this.socket.on('close', () => {
-        for (const { reject: rj } of this.pending.values()) rj(new Error('rcon connection closed'))
+        // clearTimeout too, or up to `timeout` ms of dangling timers keep the
+        // event loop alive after the socket is gone.
+        for (const { reject: rj, timer } of this.pending.values()) {
+          clearTimeout(timer)
+          rj(new Error('rcon connection closed'))
+        }
         this.pending.clear()
       })
       this.socket.once('connect', async () => {
@@ -64,28 +73,50 @@ class Rcon {
     this.buffer = Buffer.concat([this.buffer, chunk])
     while (this.buffer.length >= 4) {
       const len = this.buffer.readInt32LE(0)
+      // len is a SIGNED int32 straight off the wire. At len <= -4 the `break`
+      // below is false and subarray(len + 4) consumes nothing, so the loop
+      // spins on the same bytes at 100% CPU and the process never recovers.
+      // Anything outside the protocol's own bounds means the stream is not
+      // RCON any more - drop the socket rather than try to resynchronise.
+      if (len < 10 || len > MAX_PACKET) {
+        this.socket.destroy(new Error(`rcon: bogus packet length ${len}`))
+        return
+      }
       if (this.buffer.length < len + 4) break
       const id = this.buffer.readInt32LE(4)
-      const body = this.buffer.subarray(12, len + 2).toString('utf8')
+      // Keep the raw bytes: decoding per-fragment mangles any multi-byte
+      // sequence that straddles a packet boundary into U+FFFD.
+      const payload = this.buffer.subarray(12, len + 2)
       this.buffer = this.buffer.subarray(len + 4)
 
       // Auth failure is reported as id -1 against the request we just made.
       if (id === -1) {
-        const waiting = [...this.pending.values()][0]
-        if (waiting) { this.pending.clear(); waiting.reject(new Error('rcon auth failed - wrong password')) }
-        continue
+        // Settle EVERY waiter, not just the first - clearing the map while
+        // rejecting one left the rest pending until their timers fired.
+        const err = new Error('rcon auth failed - wrong password')
+        for (const { reject: rj, timer } of this.pending.values()) { clearTimeout(timer); rj(err) }
+        this.pending.clear()
+        this.socket.destroy()
+        return
       }
       const entry = this.pending.get(id)
       if (!entry) continue
-      // Vanilla splits any reply longer than 4096 bytes into several packets
+      // Vanilla splits any reply longer than 4096 BYTES into several packets
       // that all carry the SAME request id. Resolving on the first one hands
       // back a truncated string with no error - a 1206-chest `data get`, a
       // villager's Brain, `help` - so a full-size fragment is held and the
       // pieces joined until a short (final) one arrives.
-      if (body.length >= FRAGMENT) { entry.partial = (entry.partial || '') + body; continue }
+      //
+      // The comparison must be on bytes, not on decoded length: a full 4096-byte
+      // fragment holding any multi-byte UTF-8 decodes to FEWER than 4096 chars,
+      // which read as "final" and silently truncated the reply this code exists
+      // to reassemble.
+      entry.parts = entry.parts || []
+      entry.parts.push(payload)
+      if (payload.length >= FRAGMENT) continue
       this.pending.delete(id)
       clearTimeout(entry.timer)
-      entry.resolve((entry.partial || '') + body)
+      entry.resolve(Buffer.concat(entry.parts).toString('utf8'))
     }
   }
 
@@ -100,9 +131,13 @@ class Rcon {
       payload.copy(packet, 12)
       packet.writeInt16LE(0, payload.length + 12)
 
+      // The AUTH packet's body IS the password. Echoing it into a timeout
+      // message put it in console.error -> docker logs -> the json-file log on
+      // disk, where anyone reading logs finds a console-level credential.
+      const shown = type === TYPE_AUTH ? '<auth>' : body.slice(0, 60)
       const timer = setTimeout(() => {
         this.pending.delete(id)
-        reject(new Error(`rcon timeout after ${this.timeout}ms: ${body.slice(0, 60)}`))
+        reject(new Error(`rcon timeout after ${this.timeout}ms: ${shown}`))
       }, this.timeout)
       this.pending.set(id, { resolve, reject, timer })
       this.socket.write(packet)
