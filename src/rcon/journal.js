@@ -14,17 +14,61 @@ const path = require('path')
 const FILE = name => path.join(__dirname, '..', '..', `.rcon-undo-${name}.json`)
 
 function load (server) {
-  try { return JSON.parse(fs.readFileSync(FILE(server), 'utf8')) } catch (err) { return { builds: [] } }
+  const file = FILE(server)
+  let text
+  try {
+    text = fs.readFileSync(file, 'utf8')
+  } catch (err) {
+    if (err.code === 'ENOENT') return { builds: [] }   // first run, nothing recorded yet
+    throw err                                          // EACCES etc: do NOT silently start empty
+  }
+  let log
+  try {
+    log = JSON.parse(text)
+  } catch (err) {
+    // A parse error used to return {builds:[]}, and the next record() wrote it
+    // back - permanently discarding up to 200 build records. Move the damaged
+    // file aside instead, so the history is recoverable by hand.
+    const aside = `${file}.corrupt-${Date.now()}`
+    try { fs.renameSync(file, aside) } catch (e) {}
+    console.error(`[journal] ${file} is not valid JSON; moved to ${aside} and starting fresh`)
+    return { builds: [] }
+  }
+  // A truncated-but-valid file ({}), which used to throw on push.
+  if (!log || typeof log !== 'object' || !Array.isArray(log.builds)) return { builds: [] }
+  return log
 }
 function save (server, log) {
-  fs.writeFileSync(FILE(server), JSON.stringify(log))
+  // Write-then-rename: a crash partway through writeFileSync truncated the
+  // journal into exactly the unparseable state load() has to recover from.
+  const file = FILE(server)
+  const tmp = `${file}.tmp`
+  fs.writeFileSync(tmp, JSON.stringify(log, null, 2))
+  fs.renameSync(tmp, file)
 }
+// -> the new entry's id.
 function record (server, entry) {
   const log = load(server)
-  log.builds.push({ id: Date.now().toString(36), at: new Date().toISOString(), ...entry })
+  // Date.now().toString(36) alone collided inside one millisecond, and drop()
+  // filters by equality - so a collision deleted both records.
+  const taken = new Set(log.builds.map(b => b.id))
+  let id = Date.now().toString(36)
+  while (taken.has(id)) id = Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6)
+  log.builds.push({ id, at: new Date().toISOString(), ...entry })
   if (log.builds.length > 200) log.builds = log.builds.slice(-200)
   save(server, log)
-  return log.builds[log.builds.length - 1]
+  return id
+}
+
+// Merge fields into an existing entry. Used to flip `partial` off once a build
+// has actually finished filling.
+function update (server, id, fields) {
+  const log = load(server)
+  const entry = log.builds.find(b => b.id === id)
+  if (!entry) return false
+  Object.assign(entry, fields)
+  save(server, log)
+  return true
 }
 function list (server) { return load(server).builds }
 function last (server) { const b = load(server).builds; return b.length ? b[b.length - 1] : null }
@@ -43,4 +87,4 @@ function findAt (server, x, z) {
   return null
 }
 
-module.exports = { record, list, last, drop, findAt, load }
+module.exports = { record, update, list, last, drop, findAt, load, save }
