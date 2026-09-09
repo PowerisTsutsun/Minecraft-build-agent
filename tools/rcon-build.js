@@ -4,8 +4,12 @@ const { DATA_VERSION, SERVER } = require('../src/version')
 
 // Build into ANY server version over RCON - no bot, no protocol support needed.
 //
-//   node tools/rcon-build.js --port 25576 --password <redacted> \
-//        --what /house1 --player PowerisTsutsun
+//   node tools/rcon-build.js --server mc-test --what /house1 --player <name>
+//   node tools/rcon-build.js --host 127.0.0.1 --port 25576 --what /house1 ...
+//
+// Credentials come from rcon-servers.json (which may say "${RCON_PASSWORD}" so
+// the secret lives in .env). --password still works, but a password on argv is
+// visible in `ps` and in shell history, so prefer --server.
 //   node tools/rcon-build.js ... --what 31497.litematic --at 100 72 -190
 //
 // --what takes an aliases.json name (/house1), a schematic filename, or
@@ -19,11 +23,36 @@ const world = require('../src/rcon/world')
 const { fillBlocks, verifySample } = require('../src/rcon/build')
 const schem = require('../src/building/schematic')
 const templates = require('../src/building/templates')
-const placer = require('../src/building/placer')
+const placer = require('../src/building/bounds')
 
 function arg (name, fallback = null) {
   const i = process.argv.indexOf(`--${name}`)
   return i === -1 ? fallback : process.argv[i + 1]
+}
+
+// Prefer the named entry in rcon-servers.json - same source of truth as the
+// bot, and the only one that can hold "${RCON_PASSWORD}". Explicit flags still
+// override it, for a one-off against a server that is not in the file.
+function target () {
+  const name = arg('server', process.argv.includes('--password') ? null : SERVER)
+  let entry = {}
+  if (name) {
+    const file = path.join(__dirname, '..', 'rcon-servers.json')
+    try {
+      const found = JSON.parse(fs.readFileSync(file, 'utf8'))[name]
+      if (!found) throw new Error(`no "${name}" entry in rcon-servers.json`)
+      entry = found
+    } catch (err) {
+      console.error(`[rcon-build] ${err.message}`)
+      process.exit(1)
+    }
+  }
+  const password = arg('password', entry.password)
+  if (!password) {
+    console.error('[rcon-build] no password: pass --server <name> (see rcon-servers.json) or --password')
+    process.exit(1)
+  }
+  return { host: arg('host', entry.host || '127.0.0.1'), port: Number(arg('port', entry.port || 25575)), password }
 }
 const flag = name => process.argv.includes(`--${name}`)
 
@@ -41,7 +70,7 @@ function resolveWhat (what) {
   const version = arg('version', DATA_VERSION) // which minecraft-data to READ the file with
   const what = resolveWhat(arg('what'))
   const verifyOnly = flag('verify-only')
-  const rcon = await connect({ host: arg('host', '127.0.0.1'), port: Number(arg('port', 25575)), password: arg('password') })
+  const rcon = await connect(target())
 
   // --- load blocks -------------------------------------------------------
   let blocks, sink = 0, setup = [], label = what
