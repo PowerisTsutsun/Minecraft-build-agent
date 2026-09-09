@@ -26,6 +26,27 @@ const { outsideIn } = require('./primitives')
 
 const SCHEMATIC_DIR = process.env.MC_SCHEMATIC_DIR || path.join(__dirname, '..', '..', 'schematics')
 
+// Blueprints are downloaded from the internet and dropped in by hand - that is
+// the documented workflow - and `!build /<alias>` decompresses one straight from
+// chat. Both bounds are far above any real file (the largest here is ~2 MB
+// packed) and far below what would OOM-kill the bot on a Pi.
+const MAX_FILE_BYTES = parseInt(process.env.MC_MAX_SCHEMATIC_BYTES || String(64 * 1024 * 1024), 10)
+const MAX_UNPACKED_BYTES = parseInt(process.env.MC_MAX_SCHEMATIC_UNPACKED || String(256 * 1024 * 1024), 10)
+
+// gunzip/inflate with an explicit ceiling, so a decompression bomb throws
+// instead of consuming the machine. Anything already plain NBT passes through.
+function decompress (buffer) {
+  const zlib = require('zlib')
+  const opts = { maxOutputLength: MAX_UNPACKED_BYTES }
+  try {
+    if (buffer[0] === 0x1f && buffer[1] === 0x8b) return zlib.gunzipSync(buffer, opts)
+    if (buffer[0] === 0x78) return zlib.inflateSync(buffer, opts)
+  } catch (err) {
+    throw new Error(`refusing this file: it expands past ${MAX_UNPACKED_BYTES} bytes (${err.message})`)
+  }
+  return buffer
+}
+
 async function listSchematics () {
   try {
     const files = await fs.readdir(SCHEMATIC_DIR)
@@ -50,6 +71,10 @@ function resolveSchematicPath (name) {
 
 async function loadSchematic (name, version) {
   const file = resolveSchematicPath(name)
+  const size = fsSync.statSync(file).size
+  if (size > MAX_FILE_BYTES) {
+    throw new Error(`${path.basename(file)} is ${size} bytes, over the ${MAX_FILE_BYTES} byte limit`)
+  }
   const buffer = await fs.readFile(file)
   if (/\.litematic$/i.test(file)) {
     // Litematica's own format - see litematic.js. Same Schematic object out.
@@ -59,13 +84,14 @@ async function loadSchematic (name, version) {
   // reader only knows v1/v2 and fails with an error that looks like corruption.
   // See sponge3.js - v3 is a field rename, not a new encoding.
   const nbt = require('prismarine-nbt')
-  const { parsed } = await nbt.parse(buffer)
+  // Decompress ourselves rather than letting prismarine-nbt do it unbounded.
+  const { parsed } = await nbt.parse(decompress(buffer))
   const simplified = nbt.simplify(parsed)
   const v3 = require('./sponge3').read(simplified, version)
   if (v3) return v3
 
   const { Schematic } = require('prismarine-schematic')
-  const schematic = await Schematic.read(buffer, version)
+  const schematic = await Schematic.read(decompress(buffer), version)
   return schematic
 }
 

@@ -140,12 +140,17 @@ function build (spec, isKnownBlock) {
   const warnings = []
   let table = {}
 
+  // hasOwnProperty, not truthiness: NAMED['constructor'] resolves through the
+  // prototype chain, so a plan naming that palette got Object's constructor
+  // spread into the table instead of the "unknown palette" warning.
+  const namedPalette = n => (typeof n === 'string' && Object.prototype.hasOwnProperty.call(NAMED, n) ? NAMED[n] : null)
+
   if (typeof spec === 'string') {
-    table = NAMED[spec] ? { ...NAMED[spec] } : {}
-    if (!NAMED[spec]) warnings.push(`unknown palette "${spec}" - falling back to medieval_stone`)
-    if (!NAMED[spec]) table = { ...NAMED.medieval_stone }
+    const base = namedPalette(spec)
+    if (!base) warnings.push(`unknown palette "${spec}" - falling back to medieval_stone`)
+    table = { ...(base || NAMED.medieval_stone) }
   } else if (spec && typeof spec === 'object') {
-    const named = typeof spec.name === 'string' && NAMED[spec.name] ? NAMED[spec.name] : null
+    const named = namedPalette(spec.name)
     table = { ...(named || NAMED.medieval_stone) }
     for (const slot of SLOTS) {
       if (spec[slot] !== undefined) table[slot] = spec[slot]

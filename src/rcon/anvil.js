@@ -65,6 +65,11 @@ function specOfPaletteEntry (entry) {
   return `${name}[${keys.map(k => `${k}=${props[k]}`).join(',')}]`
 }
 
+// A region file is up to ~8 MB of raw .mca. An export scan crosses however many
+// regions its radius spans and the cache only ever grew, so a wide scan held
+// every one of them for the life of the World. Chunks parse small and stay.
+const MAX_REGIONS = parseInt(process.env.MC_ANVIL_REGION_CACHE || '6', 10)
+
 class World {
   constructor (worldDir, dimension = 'overworld') {
     this.dir = regionDir(worldDir, dimension)
@@ -74,11 +79,20 @@ class World {
 
   _region (rx, rz) {
     const key = `${rx},${rz}`
-    if (this.regions.has(key)) return this.regions.get(key)
+    if (this.regions.has(key)) {
+      // Map preserves insertion order, so re-inserting makes this the newest.
+      const hit = this.regions.get(key)
+      this.regions.delete(key)
+      this.regions.set(key, hit)
+      return hit
+    }
     const file = path.join(this.dir, `r.${rx}.${rz}.mca`)
     let buf = null
     try { buf = fs.readFileSync(file) } catch (err) { buf = null }
     this.regions.set(key, buf)
+    while (this.regions.size > MAX_REGIONS) {
+      this.regions.delete(this.regions.keys().next().value)
+    }
     return buf
   }
 
@@ -98,8 +112,11 @@ class World {
         const raw = buf.subarray(offset + 5, offset + 4 + length)
         let data
         try {
-          if (compression === 1) data = zlib.gunzipSync(raw)
-          else if (compression === 2) data = zlib.inflateSync(raw)
+          // A chunk is 16x16x384; a crafted region file that inflates to
+          // gigabytes would otherwise OOM-kill the export tools.
+          const lim = { maxOutputLength: 64 * 1024 * 1024 }
+          if (compression === 1) data = zlib.gunzipSync(raw, lim)
+          else if (compression === 2) data = zlib.inflateSync(raw, lim)
           else data = raw
         } catch (err) { data = null }
         if (data) {

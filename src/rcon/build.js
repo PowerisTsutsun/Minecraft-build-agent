@@ -3,6 +3,7 @@
 const { Vec3 } = require('vec3')
 const { baseName } = require('../building/blockspec')
 const { toBoxes, splitBox, fillCommand } = require('../building/commander')
+const { isValidSpec } = require('../building/blockspec')
 
 // ---------------------------------------------------------------------------
 // Building over RCON.
@@ -21,7 +22,9 @@ const { toBoxes, splitBox, fillCommand } = require('../building/commander')
 // the already-correct scan is gone and verification is sampled instead.
 // ---------------------------------------------------------------------------
 
-const FORCELOAD_CHUNK_LIMIT = 250
+// Vanilla refuses a /forceload add covering more than 256 chunks. commander.js
+// holds the same constant for the mineflayer path; they must not drift.
+const FORCELOAD_CHUNK_LIMIT = 256
 
 // Fill phases live in commander.js so the rcon path and the mineflayer path
 // cannot drift apart on what has to exist before what.
@@ -44,12 +47,19 @@ function boundsOf (cellKeys) {
 async function forceload (rcon, bounds, add = true) {
   const c0 = { x: Math.floor(bounds.lo.x / 16), z: Math.floor(bounds.lo.z / 16) }
   const c1 = { x: Math.floor(bounds.hi.x / 16), z: Math.floor(bounds.hi.z / 16) }
+  // A footprint wider than the limit cannot be covered by a full-width strip at
+  // all: `floor(256 / width)` clamps to 1 row and still emits width chunks, so
+  // every call was refused. Tile in both axes instead.
   const width = c1.x - c0.x + 1
-  const rows = Math.max(1, Math.floor(FORCELOAD_CHUNK_LIMIT / width))
+  const cols = Math.min(width, FORCELOAD_CHUNK_LIMIT)
+  const rows = Math.max(1, Math.floor(FORCELOAD_CHUNK_LIMIT / cols))
   const strips = []
-  for (let z = c0.z; z <= c1.z; z += rows) {
-    const z1 = Math.min(c1.z, z + rows - 1)
-    strips.push([c0.x * 16, z * 16, c1.x * 16, z1 * 16 + 15])
+  for (let x = c0.x; x <= c1.x; x += cols) {
+    const x1 = Math.min(c1.x, x + cols - 1)
+    for (let z = c0.z; z <= c1.z; z += rows) {
+      const z1 = Math.min(c1.z, z + rows - 1)
+      strips.push([x * 16, z * 16, x1 * 16 + 15, z1 * 16 + 15])
+    }
   }
   for (const [x0, z0, x1, z1] of strips) {
     await rcon.send(`forceload ${add ? 'add' : 'remove'} ${x0} ${z0} ${x1} ${z1}`)
@@ -62,10 +72,27 @@ const FILLED = /([0-9]+) block/
 async function fillBlocks (rcon, origin, blocks, opts = {}) {
   const { label = 'structure', onProgress, dryRun = false } = opts
 
+  // blockspec.js:16-22 says a material string "ends up inside a slash command
+  // the bot sends to the server, so it is untrusted input on a command line",
+  // and test/shapes.test.js asserts that `stone] ; /op someone` is rejected -
+  // but isValidSpec was only ever wired into the retired mineflayer path. Block
+  // names here come out of third-party .schem files downloaded from the
+  // internet, which is the project's stated workflow, so gate them here too.
+  const rejected = []
   const cells = new Map()
   for (const { pos, name } of blocks) {
+    if (!isValidSpec(name)) { rejected.push(name); continue }
     const t = origin.plus(pos)
     cells.set(`${t.x},${t.y},${t.z}`, name)
+  }
+  if (rejected.length) {
+    const kinds = [...new Set(rejected)].slice(0, 5).join(', ')
+    console.error(`[build] dropped ${rejected.length} cell(s) whose block spec failed validation: ${kinds}`)
+  }
+  // An empty map made boundsOf return Infinity, which became `forceload add
+  // Infinity ...` and a journal entry whose bounds serialise to null.
+  if (!cells.size) {
+    return { cells: 0, boxes: 0, changed: 0, errors: 0, rejected: rejected.length, bounds: null, firstErrors: [], boxList: [] }
   }
   const bounds = boundsOf(cells.keys())
 
@@ -74,7 +101,7 @@ async function fillBlocks (rcon, origin, blocks, opts = {}) {
     .sort((u, v) => u.p - v.p || u.i - v.i)
     .map(o => o.b)
 
-  const stats = { cells: cells.size, boxes: boxes.length, changed: 0, errors: 0, bounds, firstErrors: [], boxList: boxes }
+  const stats = { cells: cells.size, rejected: rejected.length, boxes: boxes.length, changed: 0, errors: 0, bounds, firstErrors: [], boxList: boxes }
   if (dryRun) return stats
 
   await forceload(rcon, bounds, true)
@@ -105,7 +132,13 @@ async function fillBlocks (rcon, origin, blocks, opts = {}) {
 // `enabled` is a hopper's lock, driven by redstone the moment it lands. A
 // comparator-locked sorter has hundreds of them; compare it literally and a
 // working machine reads as hundreds of failures.
-const COMPUTED = /^(distance|snowy|north|south|east|west|up|down|power|powered|enabled|shape|in_wall|lit|occupied|triggered|crafting|has_bottle_0|has_bottle_1|has_bottle_2|has_record|signal_fire|hanging|attached|disarmed|extended|conditional|bites|eggs|hatch|charges|delay|inverted|locked|note|instrument|age|level|moisture|stage|leaves|tilt)$/
+const COMPUTED = /^(distance|snowy|north|south|east|west|up|down|power|powered|enabled|shape|in_wall|lit|occupied|triggered|crafting|signal_fire|hanging|attached|disarmed|extended|conditional|age|moisture|stage|leaves|tilt|bites|eggs|hatch|charges)$/
+// Deliberately NOT stripped, though they used to be: delay (repeater timing),
+// note/instrument (noteblock), inverted (daylight detector), level (cauldron)
+// and has_bottle_*. Those are set by /fill and the server does not recompute
+// them, so stripping them let verifySample pass a repeater placed at the wrong
+// tick delay - for a project whose headline builds are sorters and farms, the
+// exact class of defect verification most needs to catch.
 
 function stripComputed (spec) {
   const i = spec.indexOf('[')

@@ -73,8 +73,21 @@ function stateIdFor (Block, registry, entry, unknown) {
   }
 }
 
+// Matches schematic.js's ceiling; litematics arrive by the same route.
+const MAX_UNPACKED_BYTES = parseInt(process.env.MC_MAX_SCHEMATIC_UNPACKED || String(256 * 1024 * 1024), 10)
+// The declared region size decides a Uint32Array allocation before any block is
+// read, so a file claiming 2000x200x2000 asks for 3.2 GB up front. Cap it at the
+// same block budget a build is allowed to be.
+const MAX_VOLUME = parseInt(process.env.MC_MAX_BLOCKS || '150000', 10) * 8
+
 function read (buffer, version) {
-  const raw = nbt.parseUncompressed(zlib.gunzipSync(buffer))
+  let unpacked
+  try {
+    unpacked = zlib.gunzipSync(buffer, { maxOutputLength: MAX_UNPACKED_BYTES })
+  } catch (err) {
+    throw new Error(`refusing this litematic: it expands past ${MAX_UNPACKED_BYTES} bytes (${err.message})`)
+  }
+  const raw = nbt.parseUncompressed(unpacked)
   const root = nbt.simplify(raw)
   const regions = root.Regions || {}
   const names = Object.keys(regions)
@@ -101,6 +114,11 @@ function read (buffer, version) {
     placed.push({ name: n, r, min, abs, longs: raw.value.Regions.value[n].value.BlockStates.value })
   }
   const size = hi.minus(lo).offset(1, 1, 1)
+  // INJ-008: check the declared volume BEFORE new Uint32Array(...) below.
+  const volume = size.x * size.y * size.z
+  if (!Number.isFinite(volume) || volume <= 0 || volume > MAX_VOLUME) {
+    throw new Error(`litematic declares a ${size.x}x${size.y}x${size.z} region (${volume} cells) - over the ${MAX_VOLUME} cell limit`)
+  }
 
   // One shared palette of state ids; index 0 is air.
   const palette = [0]
