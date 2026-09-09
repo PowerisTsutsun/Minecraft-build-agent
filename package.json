@@ -6,7 +6,7 @@
   "private": true,
   "scripts": {
     "start": "node tools/rcon-bot.js",
-    "test": "node test/schematic-v3.test.js && node test/primitives.test.js && node test/boxes.test.js && node test/shapes.test.js && node test/render.test.js && node test/stairs.test.js && node test/decorate.test.js && node test/openings.test.js && node test/architecture.test.js && node test/macros.test.js && node test/palette.test.js && node test/views.test.js && node test/pipeline.test.js && node test/inspector.test.js && node test/templates.test.js",
+    "test": "node test/schematic-v3.test.js && node test/primitives.test.js && node test/boxes.test.js && node test/shapes.test.js && node test/render.test.js && node test/stairs.test.js && node test/decorate.test.js && node test/openings.test.js && node test/architecture.test.js && node test/macros.test.js && node test/palette.test.js && node test/views.test.js && node test/pipeline.test.js && node test/inspector.test.js && node test/templates.test.js && node test/rcon-build.test.js",
     "catalog": "node tools/catalog.js && node tools/name-schematics.js --write"
   },
   "dependencies": {

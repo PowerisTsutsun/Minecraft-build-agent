@@ -132,6 +132,10 @@ async function fillBlocks (rcon, origin, blocks, opts = {}) {
 // `enabled` is a hopper's lock, driven by redstone the moment it lands. A
 // comparator-locked sorter has hundreds of them; compare it literally and a
 // working machine reads as hundreds of failures.
+// Parts a running contraption moves out from under us between the fill and the
+// check. See verifySample.
+const MOVING_PART = /^(piston_head|moving_piston)$/
+
 const COMPUTED = /^(distance|snowy|north|south|east|west|up|down|power|powered|enabled|shape|in_wall|lit|occupied|triggered|crafting|signal_fire|hanging|attached|disarmed|extended|conditional|age|moisture|stage|leaves|tilt|bites|eggs|hatch|charges)$/
 // Deliberately NOT stripped, though they used to be: delay (repeater timing),
 // note/instrument (noteblock), inverted (daylight detector), level (cauldron)
@@ -151,25 +155,60 @@ function stripComputed (spec) {
 // Confirm a random spread of cells really holds what we asked for - including
 // block state, which /fill's own count cannot tell us. Cheap: an rcon round
 // trip is well under a millisecond.
+// `execute if block` on a chunk nobody is holding answers "That position is not
+// loaded", which is not a "Test passed" and so used to be counted as a wrong
+// block. fillBlocks releases its own forceload when it finishes, so a verify
+// that runs after it reported EVERY sampled cell as a failure - the same shape
+// of phantom failure as the 240,786 recorded in the dev notes. Hold the
+// footprint for the duration and count "not loaded" separately, because an
+// unreadable cell is unknown, not wrong.
 async function verifySample (rcon, origin, blocks, sample = 1500) {
   const step = Math.max(1, Math.floor(blocks.length / sample))
   const checked = []
   for (let i = 0; i < blocks.length; i += step) checked.push(blocks[i])
   let ok = 0
   let computed = 0
+  let unloaded = 0
+  let settled = 0
   const bad = []
-  for (const b of checked) {
+  const bounds = boundsOf(checked.map(b => {
     const t = origin.plus(b.pos)
-    const out = await rcon.send(`execute if block ${t.x} ${t.y} ${t.z} minecraft:${b.name}`)
-    if (/passed/i.test(out)) { ok++; continue }
-    const loose = stripComputed(b.name)
-    if (loose !== b.name) {
-      const out2 = await rcon.send(`execute if block ${t.x} ${t.y} ${t.z} minecraft:${loose}`)
-      if (/passed/i.test(out2)) { computed++; continue }
+    return `${t.x},${t.y},${t.z}`
+  }))
+  const strips = await forceload(rcon, bounds, true)
+  try {
+    for (const b of checked) {
+      const t = origin.plus(b.pos)
+      const out = await rcon.send(`execute if block ${t.x} ${t.y} ${t.z} minecraft:${b.name}`)
+      if (/passed/i.test(out)) { ok++; continue }
+      if (/not loaded/i.test(out)) { unloaded++; continue }
+      const loose = stripComputed(b.name)
+      if (loose !== b.name) {
+        const out2 = await rcon.send(`execute if block ${t.x} ${t.y} ${t.z} minecraft:${loose}`)
+        if (/passed/i.test(out2)) { computed++; continue }
+      }
+      // A piston head only exists while its piston is out, and a blueprint
+      // captures whatever moment the machine was in when it was copied. Once
+      // the world ticks, a machine settles into its REST state - so on
+      // 4271.schematic all 12 heads are gone and all 12 pistons read retracted
+      // even though the build is correct and the machine works. That is the
+      // snapshot being wrong about rest, not the placement being wrong, and
+      // counting it as a failure buries the failures that are real.
+      if (MOVING_PART.test(baseName(b.name))) { settled++; continue }
+      if (bad.length < 8) bad.push(`${t.x},${t.y},${t.z} want ${b.name}`)
     }
-    if (bad.length < 8) bad.push(`${t.x},${t.y},${t.z} want ${b.name}`)
+  } finally {
+    for (const [x0, z0, x1, z1] of strips) await rcon.send(`forceload remove ${x0} ${z0} ${x1} ${z1}`)
   }
-  return { checked: checked.length, ok, computed, mismatched: checked.length - ok - computed, examples: bad }
+  return {
+    checked: checked.length,
+    ok,
+    computed,
+    unloaded,
+    settled,
+    mismatched: checked.length - ok - computed - unloaded - settled,
+    examples: bad
+  }
 }
 
 module.exports = { fillBlocks, verifySample, forceload, boundsOf, phaseOf }

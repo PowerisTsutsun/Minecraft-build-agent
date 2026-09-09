@@ -41,6 +41,59 @@ async function withoutDrops (rcon, fn) {
   try { return await fn() } finally { await rcon.send(`gamerule doTileDrops ${before}`) }
 }
 
+// ---------------------------------------------------------------------------
+// Build with the world's clock stopped.
+//
+// Redstone, pistons, observers and flowing water all run on *scheduled* ticks,
+// and a fill takes many ticks. So every one of them evaluates against a
+// half-built structure: a sticky piston filled as `extended=true` retracts
+// because the redstone that holds it out has not arrived yet, and its
+// piston_head pops off; an observer placed early pulses at every later fill in
+// front of it; a redstone block landing between two pistons shoves itself out
+// of a structure that is not finished standing.
+//
+// The fill phases in commander.js (phaseOf) put power sources after the
+// mechanisms they drive. That is necessary but not sufficient: it controls the
+// order, not whether the world is allowed to react in the middle of the build.
+//
+// `/tick freeze` stops scheduled ticks and entity movement while leaving block
+// placement and *neighbour* updates working - fence joins and redstone dust
+// shapes still compute - which is exactly the split a build wants. On unfreeze
+// everything evaluates once against the finished structure, so a piston clock
+// starts from its designed state instead of from whatever existed halfway
+// through.
+//
+// Measured on 16267.schem, 38 moving parts: 26 exact as-is, 34 with this.
+//
+// If the server does not understand /tick (pre-1.20.2) the build goes ahead
+// unfrozen, which is what it did before. If the world was ALREADY frozen when
+// we arrived it is left frozen - somebody else's freeze is not ours to lift.
+async function withFrozenTicks (rcon, fn) {
+  let froze = false
+  try {
+    if (!/frozen/i.test(await rcon.send('tick query'))) {
+      const out = await rcon.send('tick freeze')
+      froze = /frozen/i.test(out)
+      if (!froze) console.error(`[build] could not stop the tick, building live: ${out.trim().slice(0, 70)}`)
+    }
+  } catch (err) {
+    console.error('[build] could not stop the tick, building live:', err.message)
+  }
+  try {
+    return await fn()
+  } finally {
+    // An unfrozen world matters more than any error above it: a server left
+    // frozen has no mob AI, no crop growth and no item transport, for everyone.
+    if (froze) {
+      try {
+        await rcon.send('tick unfreeze')
+      } catch (err) {
+        console.error('[build] COULD NOT UNFREEZE - run `/tick unfreeze` by hand:', err.message)
+      }
+    }
+  }
+}
+
 const FILLED = /([0-9]+) block/
 
 // Two passes over the same volume rather than one, because the split is worth
@@ -63,4 +116,4 @@ async function runClear (rcon, boxes) {
   return { boxes: boxes.length, cleared: cleared + water, water }
 }
 
-module.exports = { clearBoxes, runClear, withoutDrops }
+module.exports = { clearBoxes, runClear, withoutDrops, withFrozenTicks }

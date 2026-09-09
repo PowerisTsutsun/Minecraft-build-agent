@@ -5,6 +5,7 @@ const { DATA_VERSION, SERVER } = require('../src/version')
 // Build into ANY server version over RCON - no bot, no protocol support needed.
 //
 //   node tools/rcon-build.js --server mc-test --what /house1 --player <name>
+//   ... --no-freeze          build without stopping the tick (the old behaviour)
 //   node tools/rcon-build.js --host 127.0.0.1 --port 25576 --what /house1 ...
 //
 // Credentials come from rcon-servers.json (which may say "${RCON_PASSWORD}" so
@@ -21,6 +22,7 @@ const { Vec3 } = require('vec3')
 const { connect } = require('../src/rcon/client')
 const world = require('../src/rcon/world')
 const { fillBlocks, verifySample } = require('../src/rcon/build')
+const { withFrozenTicks } = require('../src/rcon/clear')
 const schem = require('../src/building/schematic')
 const templates = require('../src/building/templates')
 const placer = require('../src/building/bounds')
@@ -108,17 +110,25 @@ function resolveWhat (what) {
   // --- build -------------------------------------------------------------
   if (verifyOnly) {
     const v = await verifySample(rcon, origin, blocks)
-    console.log(`verified ${v.ok}/${v.checked} sampled cells exact${v.computed ? `, ${v.computed} differ only in server-computed state` : ''}${v.mismatched ? `, ${v.mismatched} genuinely wrong` : ''}`)
+    console.log(`verified ${v.ok}/${v.checked} sampled cells exact${v.computed ? `, ${v.computed} differ only in server-computed state` : ''}${v.settled ? `, ${v.settled} moving parts that have settled since the fill` : ''}${v.unloaded ? `, ${v.unloaded} in chunks that would not stay loaded` : ''}${v.mismatched ? `, ${v.mismatched} genuinely wrong` : ''}`)
     for (const b of v.examples) console.log('   ' + b)
     rcon.close(); return
   }
 
+  // Frozen for the fill, exactly as the chat path does it - see withFrozenTicks
+  // in src/rcon/clear.js. Verification deliberately runs after the tick resumes:
+  // a piston that is *meant* to be extended only reaches that state once the
+  // redstone holding it has been evaluated.
   const t0 = Date.now()
-  const stats = await fillBlocks(rcon, origin, blocks, {
+  const fill = () => fillBlocks(rcon, origin, blocks, {
     label,
     dryRun: flag('dry'),
     onProgress: (i, n) => console.log(`  ...${i}/${n} fills`)
   })
+  // --no-freeze builds the old way, so the two can be compared on the same
+  // blueprint. It is the only way to tell a placement bug from a machine simply
+  // settling into its rest state.
+  const stats = (flag('dry') || flag('no-freeze')) ? await fill() : await withFrozenTicks(rcon, fill)
   const secs = ((Date.now() - t0) / 1000).toFixed(1)
   console.log(`${flag('dry') ? 'DRY RUN' : 'placed'}: ${stats.cells} cells as ${stats.boxes} fills${flag('dry') ? '' : `, ${stats.changed} blocks changed in ${secs}s`}`)
   if (stats.errors) {
@@ -128,7 +138,7 @@ function resolveWhat (what) {
 
   if (!flag('dry')) {
     const v = await verifySample(rcon, origin, blocks)
-    console.log(`verified ${v.ok}/${v.checked} sampled cells exact${v.computed ? `, ${v.computed} differ only in server-computed state (leaf distance, connections)` : ''}${v.mismatched ? `, ${v.mismatched} genuinely wrong` : ''}`)
+    console.log(`verified ${v.ok}/${v.checked} sampled cells exact${v.computed ? `, ${v.computed} differ only in server-computed state (leaf distance, connections)` : ''}${v.settled ? `, ${v.settled} moving parts that have settled since the fill` : ''}${v.unloaded ? `, ${v.unloaded} in chunks that would not stay loaded` : ''}${v.mismatched ? `, ${v.mismatched} genuinely wrong` : ''}`)
     for (const b of v.examples) console.log('   ' + b)
 
     if (setup.length) {

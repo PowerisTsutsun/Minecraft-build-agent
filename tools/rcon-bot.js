@@ -19,7 +19,7 @@ const { Vec3 } = require('vec3')
 const { connect } = require('../src/rcon/client')
 const world = require('../src/rcon/world')
 const { fillBlocks } = require('../src/rcon/build')
-const { clearBoxes, runClear, withoutDrops } = require('../src/rcon/clear')
+const { clearBoxes, runClear, withoutDrops, withFrozenTicks } = require('../src/rcon/clear')
 const { unloadedWarning } = require('../src/building/machine')
 const { MAX_BLOCKS } = require('../src/config')
 
@@ -287,26 +287,6 @@ async function doBuild (player, args) {
 
   const t0 = Date.now()
 
-  // Empty the volume first. Schematics carry no air - schematic.js drops every
-  // air cell at load - so without this the blueprint's interior keeps whatever
-  // was already standing there. On land that is two builds interpenetrating;
-  // in water it is a house that arrives full of ocean.
-  if (!dry && !noclear) {
-    // footprintOf reports lo plus width/height/depth - there is no hi field.
-    const lo = origin.plus(footprint.lo)
-    const hi = lo.offset(footprint.width - 1, footprint.height - 1, footprint.depth - 1)
-    const res = await withoutDrops(rcon, () => runClear(rcon, clearBoxes({ lo, hi })))
-    if (res.cleared) await say(`Cleared ${res.cleared.toLocaleString()} blocks out of the way first.`)
-    // Clearing gets the build started dry; it cannot keep it that way. Any
-    // opening in the blueprint is a hole the ocean flows straight back through,
-    // and that is vanilla behaviour, not something placing blocks differently
-    // can fix. Measured on mc-test: flushed to 125 cells, back to 274 in 8s.
-    if (res.water > 50) {
-      await say(`Heads up: ${res.water.toLocaleString()} of those were water - this site is underwater.`, 'yellow')
-      await say('It will flood again through any door or window. Build above the waterline, or wall the site off first.', 'yellow')
-    }
-  }
-
   // A machine placed with empty filter hoppers looks perfect and does nothing.
   // setup.length counts every line including /summon; the warning wants the
   // number of containers actually loaded, or a template with enough summons
@@ -326,7 +306,34 @@ async function doBuild (player, args) {
     boxes: plan.boxList.map(b => ({ min: [b.min.x, b.min.y, b.min.z], max: [b.max.x, b.max.y, b.max.z] }))
   })
 
-  const stats = await fillBlocks(rcon, origin, blocks, { label })
+  // Clear and fill inside ONE frozen tick - see withFrozenTicks in clear.js.
+  // Two things fall out of that. Redstone, pistons and observers cannot fire
+  // against a half-built structure, which is what left sticky pistons retracted
+  // and piston heads popped; and the ocean cannot flow back into a cleared site
+  // before the blocks that belong there arrive, because no water tick runs in
+  // between.
+  const stats = await withFrozenTicks(rcon, async () => {
+    // Empty the volume first. Schematics carry no air - schematic.js drops every
+    // air cell at load - so without this the blueprint's interior keeps whatever
+    // was already standing there. On land that is two builds interpenetrating;
+    // in water it is a house that arrives full of ocean.
+    if (!noclear) {
+      // footprintOf reports lo plus width/height/depth - there is no hi field.
+      const lo = origin.plus(footprint.lo)
+      const hi = lo.offset(footprint.width - 1, footprint.height - 1, footprint.depth - 1)
+      const res = await withoutDrops(rcon, () => runClear(rcon, clearBoxes({ lo, hi })))
+      if (res.cleared) await say(`Cleared ${res.cleared.toLocaleString()} blocks out of the way first.`)
+      // Clearing gets the build started dry; it cannot keep it that way. Any
+      // opening in the blueprint is a hole the ocean flows straight back through
+      // once the tick resumes, and that is vanilla behaviour, not something
+      // placing blocks differently can fix.
+      if (res.water > 50) {
+        await say(`Heads up: ${res.water.toLocaleString()} of those were water - this site is underwater.`, 'yellow')
+        await say('It will flood again through any door or window. Build above the waterline, or wall the site off first.', 'yellow')
+      }
+    }
+    return fillBlocks(rcon, origin, blocks, { label })
+  })
   journal.update(serverName, entryId, { partial: false })
   await say(`Done in ${((Date.now() - t0) / 1000).toFixed(1)}s - ${stats.changed} blocks changed${stats.errors ? `, ${stats.errors} commands errored` : ''}. !remove to take it back out.`, 'green')
 
@@ -444,6 +451,11 @@ async function main () {
     try {
       await rcon.send('gamerule doTileDrops true')
       await rcon.send('forceload remove all')
+      // withFrozenTicks unfreezes in a finally, which does not run when the
+      // process is signalled mid-build. A server left frozen has no mob AI, no
+      // crop growth and no item transport, so this is the worst thing to leave
+      // behind - lift it unconditionally.
+      await rcon.send('tick unfreeze')
     } catch (err) {
       console.error('[bot] could not restore state:', err.message)
     }
