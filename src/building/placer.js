@@ -506,22 +506,9 @@ function findSite (bot, near, footprint) {
   return { origin: new Vec3(base.x + 3, findGroundY(bot, base), base.z), ring: -1, searched: SITE_MAX_RINGS * 8 }
 }
 
-function footprintOf (blocks) {
-  const lo = { x: Infinity, y: Infinity, z: Infinity }
-  const hi = { x: -Infinity, y: -Infinity, z: -Infinity }
-  for (const b of blocks) {
-    lo.x = Math.min(lo.x, b.pos.x); hi.x = Math.max(hi.x, b.pos.x)
-    lo.y = Math.min(lo.y, b.pos.y); hi.y = Math.max(hi.y, b.pos.y)
-    lo.z = Math.min(lo.z, b.pos.z); hi.z = Math.max(hi.z, b.pos.z)
-  }
-  if (!Number.isFinite(lo.x)) return { width: 1, depth: 1, height: 1, lo: { x: 0, y: 0, z: 0 } }
-  return {
-    width: hi.x - lo.x + 1,
-    depth: hi.z - lo.z + 1,
-    height: hi.y - lo.y + 1,
-    lo
-  }
-}
+// Moved to bounds.js so the live path can have it without pulling in
+// mineflayer-pathfinder. Re-exported here for the retired callers.
+const { footprintOf } = require('./bounds')
 
 module.exports = {
   findSite,
