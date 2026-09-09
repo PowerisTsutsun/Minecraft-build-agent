@@ -137,8 +137,11 @@ const DIR = { north: [0, 0, -1], south: [0, 0, 1], west: [-1, 0, 0], east: [1, 0
   if (contested) console.error(`${contested} slot(s) took their second-choice plank because their first was already claimed`)
   console.error(`${filters.length} filters: ${placements.length} routed to a chest with an open face, ${unrouted} whose output chain never reached a chest; placing ${use.length}`)
 
+  const { assertItemId } = require('./lib-sorter')
   const cmds = use.map(p =>
-    `summon minecraft:glow_item_frame ${p.pos.x} ${p.pos.y} ${p.pos.z} {Facing:${p.facing}b,Fixed:1b,Invulnerable:1b,Item:{id:"${p.item}",count:1}}`)
+    // The id goes inside double quotes with nothing escaping them; assert the
+    // vanilla id shape here so this does not rely on where p.item came from.
+    `summon minecraft:glow_item_frame ${p.pos.x} ${p.pos.y} ${p.pos.z} {Facing:${Number(p.facing)}b,Fixed:1b,Invulnerable:1b,Item:{id:"${assertItemId(p.item)}",count:1}}`)
 
   if (!has('apply') && !has('clear')) {
     // A label cell must belong to exactly one slot. Two filters resolving to

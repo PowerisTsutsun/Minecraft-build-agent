@@ -157,6 +157,17 @@ function findFilters (blocks) {
 }
 
 
+// An item id ends up interpolated into `/data merge block ... {Items:[...]}`
+// and into a /summon's Item tag, inside double quotes and with nothing escaping
+// them. Vanilla ids are [a-z0-9_] only, so requiring exactly that closes the
+// quote-break before the string ever reaches a command.
+const ITEM_ID = /^[a-z0-9_]+$/
+function isItemId (registry, name) {
+  // hasOwnProperty, not truthiness: itemsByName['constructor'] is truthy through
+  // the prototype chain, so five non-items passed this gate as real ones.
+  return ITEM_ID.test(name) && Object.prototype.hasOwnProperty.call(registry.itemsByName, name)
+}
+
 function itemsFor (need, listFile) {
   const registry = require('minecraft-data')(DATA_VERSION)
   const file = listFile || (fs.existsSync(DEFAULT_LIST) ? DEFAULT_LIST : null)
@@ -164,9 +175,17 @@ function itemsFor (need, listFile) {
     ? fs.readFileSync(file, 'utf8').split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#'))
     : defaultItems(registry, need)
   return items.map(n => (n.startsWith('minecraft:') ? n : 'minecraft:' + n))
-    .filter(n => registry.itemsByName[n.replace('minecraft:', '')])
+    .filter(n => isItemId(registry, n.replace('minecraft:', '')))
     .filter(n => !UNOBTAINABLE.test(n.replace('minecraft:', '')))
     .slice(0, need)
 }
 
-module.exports = { findFilters, itemsFor, defaultItems, UNOBTAINABLE, NOT_WORTH_A_SLOT }
+// Asserted immediately before interpolation, so the guarantee does not depend
+// on the caller having come through itemsFor.
+function assertItemId (id) {
+  const bare = String(id).replace(/^minecraft:/, '')
+  if (!ITEM_ID.test(bare)) throw new Error(`refusing to build a command around item id ${JSON.stringify(id)}`)
+  return id
+}
+
+module.exports = { findFilters, itemsFor, defaultItems, assertItemId, isItemId, ITEM_ID, UNOBTAINABLE, NOT_WORTH_A_SLOT }

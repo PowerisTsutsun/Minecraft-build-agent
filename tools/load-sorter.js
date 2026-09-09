@@ -36,9 +36,10 @@ const JUNK_ALT = 'minecraft:bone'   // for the slot whose target IS a stick
 
 // Slot order and item list come from lib-sorter.js, shared with label-sorter.js,
 // so a filter's charge and the frame under its chests can never disagree.
-const { findFilters, itemsFor } = require('./lib-sorter')
+const { findFilters, itemsFor, assertItemId } = require('./lib-sorter')
 
 function mergeCommand (pos, item, absolute) {
+  assertItemId(item)
   const junk = item === JUNK ? JUNK_ALT : JUNK
   const slots = [`{Slot:0b,id:"${item}",count:${FILTER_COUNT}}`]
   for (let s = 1; s <= 4; s++) slots.push(`{Slot:${s}b,id:"${junk}",count:1}`)
