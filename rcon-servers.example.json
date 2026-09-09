@@ -1,9 +1,15 @@
 {
-  "_comment": "Copy to rcon-servers.json and edit. One entry per server the bot may drive. `password` may be ${ENV_VAR}. `log` and the world dir are the paths INSIDE the bot container - see compose.yml for the mounts. `readVersion` is the minecraft-data registry used to read schematics (see src/version.js).",
+  "_comment": "Copy to rcon-servers.json and edit. One entry per server the bot may drive. `allow` is REQUIRED: RCON is console-level, so anyone on that list can /fill and /remove anything - leave it empty and the bot refuses every builder. `operators` may remove other people's builds (defaults to the first allow entry). `password` may be ${ENV_VAR}. `log` and the world dir are paths INSIDE the bot container - see compose.yml. `readVersion` is the minecraft-data registry used to read schematics (see src/version.js).",
   "mc": {
     "host": "127.0.0.1",
     "port": 25575,
     "password": "${RCON_PASSWORD}",
+    "allow": [
+      "YourMinecraftName"
+    ],
+    "operators": [
+      "YourMinecraftName"
+    ],
     "log": "/servers/mc/logs/latest.log",
     "readVersion": "26.1"
   }
