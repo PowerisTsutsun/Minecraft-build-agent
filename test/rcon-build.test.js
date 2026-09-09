@@ -144,6 +144,43 @@ check('phase: a nether portal fills last of all',
     !hostile.sent.some(c => c.includes('/op')),
     hostile.sent.join(' | '))
 
+  // --- the gamerule rename ------------------------------------------------
+  //
+  // 26.2 calls it block_drops; 26.1 and earlier call it doTileDrops, and neither
+  // server accepts the other's name. The module caches its answer, so each case
+  // needs a fresh copy of it.
+  const freshClear = () => {
+    delete require.cache[require.resolve('../src/rcon/clear')]
+    return require('../src/rcon/clear')
+  }
+  const REJECT = 'Incorrect argument for command'
+
+  const modern = fakeRcon({ 'gamerule doTileDrops': REJECT, 'gamerule block_drops': 'Gamerule block_drops is currently set to: true' })
+  const c1 = freshClear()
+  check('gamerule: a 26.2 server resolves to block_drops',
+    (await c1.dropRule(modern)) === 'block_drops', modern.sent.join(' | '))
+
+  const legacy = fakeRcon({ 'gamerule block_drops': REJECT, 'gamerule doTileDrops': 'Gamerule doTileDrops is currently set to: true' })
+  const c2 = freshClear()
+  check('gamerule: an older server falls back to doTileDrops',
+    (await c2.dropRule(legacy)) === 'doTileDrops', legacy.sent.join(' | '))
+
+  const modern2 = fakeRcon({ 'gamerule doTileDrops': REJECT, 'gamerule block_drops': 'Gamerule block_drops is currently set to: true' })
+  const c3 = freshClear()
+  await c3.withoutDrops(modern2, async () => 'cleared')
+  check('gamerule: withoutDrops turns the resolved rule off and back on',
+    modern2.sent.includes('gamerule block_drops false') &&
+    modern2.sent.includes('gamerule block_drops true') &&
+    !modern2.sent.includes('gamerule doTileDrops false'),
+    modern2.sent.join(' | '))
+
+  const neither = fakeRcon({ 'gamerule': REJECT })
+  const c4 = freshClear()
+  const ran = await c4.withoutDrops(neither, async () => 'still cleared')
+  check('gamerule: a server with neither name still clears, with drops left on',
+    ran === 'still cleared' && !neither.sent.some(c => / false$/.test(c)),
+    neither.sent.join(' | '))
+
   console.log(failures ? `\n${failures} FAILED` : '\nall passed')
   process.exit(failures ? 1 : 0)
 })()

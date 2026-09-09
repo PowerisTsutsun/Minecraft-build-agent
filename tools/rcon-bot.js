@@ -19,7 +19,7 @@ const { Vec3 } = require('vec3')
 const { connect } = require('../src/rcon/client')
 const world = require('../src/rcon/world')
 const { fillBlocks } = require('../src/rcon/build')
-const { clearBoxes, runClear, withoutDrops, withFrozenTicks } = require('../src/rcon/clear')
+const { clearBoxes, runClear, withoutDrops, withFrozenTicks, restoreDrops } = require('../src/rcon/clear')
 const { unloadedWarning } = require('../src/building/machine')
 const { MAX_BLOCKS } = require('../src/config')
 
@@ -449,7 +449,8 @@ async function main () {
     shuttingDown = true
     console.error(`[bot] ${sig} - restoring server state before exit`)
     try {
-      await rcon.send('gamerule doTileDrops true')
+      // Not a literal rule name: 26.2 renamed them all, see clear.js.
+      await restoreDrops(rcon)
       await rcon.send('forceload remove all')
       // withFrozenTicks unfreezes in a finally, which does not run when the
       // process is signalled mid-build. A server left frozen has no mob AI, no

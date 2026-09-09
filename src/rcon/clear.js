@@ -36,9 +36,43 @@ function clearBoxes (bounds, opts = {}) {
 // to place. Switch drops off for the duration, and put the gamerule back the
 // way it was found rather than assuming it was on.
 async function withoutDrops (rcon, fn) {
-  const before = /false/.test(await rcon.send('gamerule doTileDrops')) ? 'false' : 'true'
-  await rcon.send('gamerule doTileDrops false')
-  try { return await fn() } finally { await rcon.send(`gamerule doTileDrops ${before}`) }
+  const rule = await dropRule(rcon)
+  if (!rule) return fn()
+  const before = /false/.test(await rcon.send(`gamerule ${rule}`)) ? 'false' : 'true'
+  await rcon.send(`gamerule ${rule} false`)
+  try { return await fn() } finally { await rcon.send(`gamerule ${rule} ${before}`) }
+}
+
+// 26.2 renamed every gamerule from camelCase to snake_case - `doTileDrops` is
+// now `block_drops`, `doMobLoot` is `mob_drops`, and so on. The old names are
+// not aliases: the server answers "Incorrect argument for command" and, because
+// nothing read the reply, withoutDrops silently did nothing on 26.2. Every clear
+// since has been spraying item entities across the site.
+//
+// Resolved by asking the server rather than by version number, so one binary
+// works against a 26.1 sandbox and a 26.2 server. Cached per process.
+const DROP_RULE_NAMES = ['block_drops', 'doTileDrops']
+const REJECTED = /incorrect argument|unknown or incomplete/i
+let cachedDropRule
+async function dropRule (rcon) {
+  if (cachedDropRule !== undefined) return cachedDropRule
+  for (const name of DROP_RULE_NAMES) {
+    if (!REJECTED.test(await rcon.send(`gamerule ${name}`))) {
+      cachedDropRule = name
+      return name
+    }
+  }
+  console.error(`[build] this server knows none of ${DROP_RULE_NAMES.join('/')} - clearing with drops left on`)
+  cachedDropRule = null
+  return null
+}
+
+// Best effort, for the signal handler: put drops back without needing to know
+// which name this server uses.
+async function restoreDrops (rcon) {
+  const rule = await dropRule(rcon)
+  if (rule) await rcon.send(`gamerule ${rule} true`)
+  return rule
 }
 
 // ---------------------------------------------------------------------------
@@ -116,4 +150,4 @@ async function runClear (rcon, boxes) {
   return { boxes: boxes.length, cleared: cleared + water, water }
 }
 
-module.exports = { clearBoxes, runClear, withoutDrops, withFrozenTicks }
+module.exports = { clearBoxes, runClear, withoutDrops, withFrozenTicks, dropRule, restoreDrops }
