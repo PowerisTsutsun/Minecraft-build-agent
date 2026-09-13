@@ -34,16 +34,22 @@ const templates = require('../src/building/templates')
 // bounds.js, not placer.js: the live path needs footprintOf and nothing else,
 // (bounds.js, not the old placer, which pulled mineflayer in at require time).
 const placer = require('../src/building/bounds')
+const servers = require('../src/rcon/servers')
+const catalogue = require('../src/building/catalogue')
 
 const arg = (n, d = null) => { const i = process.argv.indexOf(`--${n}`); return i === -1 ? d : process.argv[i + 1] }
 const serverName = arg('server', SERVER)
 // rcon-servers.json is per-machine and gitignored (it holds the rcon password);
-// the committed example works out of the box against the compose.yml in the repo.
-const serversFile = ['rcon-servers.json', 'rcon-servers.example.json']
-  .map(f => path.join(__dirname, '..', f)).find(f => fs.existsSync(f))
-const servers = JSON.parse(fs.readFileSync(serversFile, 'utf8'))
-const cfg = servers[serverName]
-if (!cfg) { console.error(`unknown server "${serverName}"`); process.exit(1) }
+// the committed example works out of the box against the compose.yml in the
+// repo. src/rcon/servers.js resolves ${VAR} references against the environment,
+// so the allow list can come from .env rather than a hand-edited JSON file.
+let cfg
+try {
+  cfg = servers.load(serverName)
+} catch (err) {
+  console.error(`[bot] ${err.message}`)
+  process.exit(1)
+}
 
 // Authorisation. RCON is console level: whoever gets a !build line into the
 // log drives a console socket. The old guard only engaged when cfg.allow was an
@@ -438,6 +444,28 @@ async function main () {
   rcon = await connect({ host: cfg.host, port: cfg.port, password: cfg.password })
   console.log(`[bot] rcon connected to ${serverName}, watching ${cfg.log}`)
   await say('Builder online. !build list to see blueprints, !help for commands.', 'aqua')
+
+  // Catch the catalogue up with the folder, in the background. A file dropped
+  // into schematics/ builds by its filename immediately, but it has no friendly
+  // name and no line in !build list until this runs - and running it by hand
+  // needed a node on the host, which a Docker-only install has not got. The bot
+  // stays usable throughout: this only adds names.
+  if (catalogue.isStale() && process.env.MC_NO_AUTOCATALOG !== '1') {
+    console.log('[bot] schematics/ is newer than the catalogue - rebuilding in the background')
+    catalogue.refresh((err, added) => {
+      if (err) {
+        // Not fatal, and not silent: every blueprint still builds by filename.
+        console.error(`[bot] catalogue rebuild failed: ${err.message}`)
+        return say('Could not rebuild the blueprint catalogue - new files still build by filename.', 'yellow')
+          .catch(() => {})
+      }
+      console.log(`[bot] catalogue rebuilt${added.length ? ', named: ' + added.join(' ') : ', no new names'}`)
+      if (added.length) {
+        say(`${added.length} new blueprint${added.length > 1 ? 's' : ''} named: ${added.map(n => '/' + n).join(' ')}`, 'green')
+          .catch(() => {})
+      }
+    })
+  }
 
   // Start from wherever the log is now, or from zero if the server has not
   // written it yet - statSync outside a guard turned "bot started before the

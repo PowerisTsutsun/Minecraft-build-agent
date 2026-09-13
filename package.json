@@ -6,8 +6,9 @@
   "private": true,
   "scripts": {
     "start": "node tools/rcon-bot.js",
-    "test": "node test/schematic-v3.test.js && node test/boxes.test.js && node test/blueprints.test.js && node test/templates.test.js && node test/rcon-build.test.js",
-    "catalog": "node tools/catalog.js && node tools/name-schematics.js --write"
+    "test": "node test/schematic-v3.test.js && node test/boxes.test.js && node test/blueprints.test.js && node test/setup.test.js && node test/templates.test.js && node test/rcon-build.test.js",
+    "catalog": "node tools/catalog.js && node tools/name-schematics.js --write",
+    "setup": "sh ./setup.sh"
   },
   "dependencies": {
     "minecraft-data": "^3.112.0",

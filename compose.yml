@@ -1,7 +1,10 @@
 # A complete, runnable setup: one vanilla 26.2 server and the bot driving it.
 #
-#   cp .env.example .env            # set RCON_PASSWORD
-#   cp rcon-servers.example.json rcon-servers.json
+#   ./setup.sh                      # writes .env, starts both, waits for rcon
+#
+# or by hand:
+#
+#   cp .env.example .env            # set BUILDER and RCON_PASSWORD
 #   docker compose up -d
 #   docker compose logs -f bot      # wait for "rcon connected"
 #
@@ -42,6 +45,9 @@ services:
       MC_SERVER: "mc"                 # which rcon-servers.json entry to drive
       MC_MAX_BLOCKS: "500000"         # refuse anything bigger; downloaded builds run to ~370k
       RCON_PASSWORD: ${RCON_PASSWORD}
+      # Who may build. rcon-servers.example.json reads it as ${BUILDER}; unset
+      # means the bot refuses everyone rather than opening the console.
+      BUILDER: ${BUILDER:-}
     volumes:
       - ./:/app
       # RCON can send commands but cannot receive chat, so the bot tails the

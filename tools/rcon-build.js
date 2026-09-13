@@ -27,6 +27,7 @@ const schem = require('../src/building/schematic')
 const templates = require('../src/building/templates')
 const placer = require('../src/building/bounds')
 const blueprints = require('../src/building/blueprints')
+const servers = require('../src/rcon/servers')
 
 function arg (name, fallback = null) {
   const i = process.argv.indexOf(`--${name}`)
@@ -40,11 +41,8 @@ function target () {
   const name = arg('server', process.argv.includes('--password') ? null : SERVER)
   let entry = {}
   if (name) {
-    const file = path.join(__dirname, '..', 'rcon-servers.json')
     try {
-      const found = JSON.parse(fs.readFileSync(file, 'utf8'))[name]
-      if (!found) throw new Error(`no "${name}" entry in rcon-servers.json`)
-      entry = found
+      entry = servers.load(name)
     } catch (err) {
       console.error(`[rcon-build] ${err.message}`)
       process.exit(1)

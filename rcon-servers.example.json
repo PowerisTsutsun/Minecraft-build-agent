@@ -1,14 +1,14 @@
 {
-  "_comment": "Copy to rcon-servers.json and edit. One entry per server the bot may drive. `allow` is REQUIRED: RCON is console-level, so anyone on that list can /fill and /remove anything - leave it empty and the bot refuses every builder. `operators` may remove other people's builds (defaults to the first allow entry). `password` may be ${ENV_VAR}. `log` and the world dir are paths INSIDE the bot container - see compose.yml. `readVersion` is the minecraft-data registry used to read schematics (see src/version.js).",
+  "_comment": "Works as-is against the compose.yml in this repo - setup.sh writes the two values it needs (RCON_PASSWORD, BUILDER) into .env, and ${VAR} references here are resolved from the environment. Copy to rcon-servers.json only if you need more than one server or want to hand-edit. `allow` is REQUIRED: RCON is console-level, so anyone on that list can /fill anything - an unset BUILDER leaves it empty and the bot refuses every builder rather than opening the console to the world. `operators` may remove other people's builds (defaults to the first allow entry). `log` and the world dir are paths INSIDE the bot container - see compose.yml. `readVersion` is the minecraft-data registry used to read schematics (see src/version.js).",
   "mc": {
     "host": "127.0.0.1",
     "port": 25575,
     "password": "${RCON_PASSWORD}",
     "allow": [
-      "YourMinecraftName"
+      "${BUILDER}"
     ],
     "operators": [
-      "YourMinecraftName"
+      "${BUILDER}"
     ],
     "log": "/servers/mc/logs/latest.log",
     "readVersion": "26.1"

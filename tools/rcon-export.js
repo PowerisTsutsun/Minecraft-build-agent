@@ -6,7 +6,7 @@ const { DATA_VERSION, SERVER } = require('../src/version')
 // as a blueprint. Reads the region files (see src/rcon/anvil.js) because RCON
 // cannot report what block is at a position.
 //
-//   node tools/rcon-export.js --server mc-test --player PowerisTsutsun --name house7
+//   node tools/rcon-export.js --server mc-test --player <YourName> --name house7
 //   node tools/rcon-export.js --server mc-test --center 100 70 -50 --name barn --radius 24
 
 const fs = require('fs')
@@ -14,6 +14,7 @@ const path = require('path')
 const { Vec3 } = require('vec3')
 const { Schematic } = require('prismarine-schematic')
 const { connect } = require('../src/rcon/client')
+const servers = require('../src/rcon/servers')
 const world = require('../src/rcon/world')
 const { World } = require('../src/rcon/anvil')
 const schemMod = require('../src/building/schematic')
@@ -27,9 +28,7 @@ const baseOf = spec => spec.split('[')[0]
 
 ;(async () => {
   const serverName = arg('server', SERVER)
-  const servers = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'rcon-servers.json'), 'utf8'))
-  const cfg = servers[serverName]
-  if (!cfg) throw new Error(`unknown server "${serverName}"`)
+  const cfg = servers.load(serverName)
   const name = arg('name')
   if (!name || !/^[a-z0-9][a-z0-9_-]{0,39}$/.test(name)) throw new Error('--name must be lowercase letters, digits, - or _')
 
