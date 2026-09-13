@@ -36,6 +36,7 @@ const machines = require('../src/building/machines')
 const placer = require('../src/building/bounds')
 const servers = require('../src/rcon/servers')
 const catalogue = require('../src/building/catalogue')
+const protect = require('../src/building/protect')
 
 const arg = (n, d = null) => { const i = process.argv.indexOf(`--${n}`); return i === -1 ? d : process.argv[i + 1] }
 const serverName = arg('server', SERVER)
@@ -317,7 +318,10 @@ async function doBuild (player, args) {
   // setup.length counts every line including /summon; the warning wants the
   // number of containers actually loaded, or a template with enough summons
   // silently loses the warning it exists for.
-  const loadedContainers = setup.filter(l => /^\/?data merge block/.test(l.trim())).length
+  // Only merges that put ITEMS in a block count as loading a container. A
+  // beacon effect is also a `data merge block`, and counting it made the
+  // sorter say "only 4 of 280 filters get loaded" about its four beacons.
+  const loadedContainers = setup.filter(l => /^\/?data merge block .*\bItems:/.test(l.trim())).length
   const machineWarn = unloadedWarning(blocks, loadedContainers)
   if (machineWarn) for (const line of machineWarn) await say(line, 'yellow')
 
@@ -326,9 +330,28 @@ async function doBuild (player, args) {
   // were permanently un-removable by !remove. A dry-run entry costs nothing;
   // an unrecorded partial build cannot be undone.
   const plan = await fillBlocks(rcon, origin, blocks, { label, dryRun: true })
+
+  // Would this land on top of a machine? Some blueprints declare the volume
+  // that makes them work (see src/building/protect.js); a sorting bank is
+  // hoppers and dust buried under a grassy ridge, and filling through it leaves
+  // a machine that still looks right and silently misroutes. Refuse instead.
+  let clashes = []
+  try { clashes = protect.conflicts(serverName, plan.bounds) } catch (err) {
+    console.error(`[bot] protect check failed: ${err.message}`)
+    return say(`Refusing: a protected-volume file could not be read (${err.message}).`, 'red')
+  }
+  if (clashes.length) {
+    const broken = clashes.filter(c => c.error)
+    if (broken.length) return say(`Refusing: ${broken[0].label}'s protect file is unreadable (${broken[0].error}).`, 'red')
+    const c = clashes[0]
+    await say(`Refusing: that would cut into /${c.label} - ${c.why}.`, 'red')
+    return say(`Its protected volume is ${c.lo.x} ${c.lo.y} ${c.lo.z} to ${c.hi.x} ${c.hi.y} ${c.hi.z}. Build clear of it, or !remove /${c.label} first.`, 'red')
+  }
+
   if (dry) return say(`Dry run: would send ${plan.boxes} fill commands.`)
   const entryId = journal.record(serverName, {
     label, player, bounds: plan.bounds, partial: true,
+    origin: [origin.x, origin.y, origin.z],
     boxes: plan.boxList.map(b => ({ min: [b.min.x, b.min.y, b.min.z], max: [b.max.x, b.max.y, b.max.z] }))
   })
 

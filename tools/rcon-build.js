@@ -27,6 +27,7 @@ const schem = require('../src/building/schematic')
 const machines = require('../src/building/machines')
 const placer = require('../src/building/bounds')
 const blueprints = require('../src/building/blueprints')
+const protect = require('../src/building/protect')
 const servers = require('../src/rcon/servers')
 
 function arg (name, fallback = null) {
@@ -118,6 +119,19 @@ function resolveWhat (what) {
     console.log(`verified ${v.ok}/${v.checked} sampled cells exact${v.computed ? `, ${v.computed} differ only in server-computed state` : ''}${v.settled ? `, ${v.settled} moving parts that have settled since the fill` : ''}${v.unloaded ? `, ${v.unloaded} in chunks that would not stay loaded` : ''}${v.mismatched ? `, ${v.mismatched} genuinely wrong` : ''}`)
     for (const b of v.examples) console.log('   ' + b)
     rcon.close(); return
+  }
+
+  // Same protected-volume guard the chat path uses.
+  {
+    const pre = await fillBlocks(rcon, origin, blocks, { label, dryRun: true })
+    const clashes = protect.conflicts(arg('server', SERVER), pre.bounds)
+    if (clashes.length) {
+      const c = clashes[0]
+      console.error(c.error
+        ? `[rcon-build] refusing: ${c.label}'s protect file is unreadable (${c.error})`
+        : `[rcon-build] refusing: this would cut into /${c.label} - ${c.why}\n  its protected volume is ${c.lo.x} ${c.lo.y} ${c.lo.z} to ${c.hi.x} ${c.hi.y} ${c.hi.z}`)
+      process.exit(3)
+    }
   }
 
   // Frozen for the fill, exactly as the chat path does it - see withFrozenTicks

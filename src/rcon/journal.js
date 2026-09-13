@@ -11,7 +11,10 @@ const path = require('path')
 // boxes, which is enough to clear a build back to air - the same deal the old
 // digging undo gave: you get the hole back, not the hill.
 
-const FILE = name => path.join(__dirname, '..', '..', `.rcon-undo-${name}.json`)
+// MC_JOURNAL_DIR lets a test point the journal at a temp directory instead of
+// the repo root; unset, it is the repo root as before.
+const DIR = process.env.MC_JOURNAL_DIR || path.join(__dirname, '..', '..')
+const FILE = name => path.join(DIR, `.rcon-undo-${name}.json`)
 
 function load (server) {
   const file = FILE(server)

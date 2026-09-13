@@ -6,7 +6,7 @@
   "private": true,
   "scripts": {
     "start": "node tools/rcon-bot.js",
-    "test": "node test/schematic-v3.test.js && node test/boxes.test.js && node test/blueprints.test.js && node test/setup.test.js && node test/access.test.js && node test/machines.test.js && node test/rcon-build.test.js",
+    "test": "node test/schematic-v3.test.js && node test/boxes.test.js && node test/blueprints.test.js && node test/setup.test.js && node test/access.test.js && node test/machines.test.js && node test/protect.test.js && node test/rcon-build.test.js",
     "catalog": "node tools/catalog.js",
     "setup": "sh ./setup.sh"
   },

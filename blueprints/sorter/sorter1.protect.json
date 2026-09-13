@@ -1,0 +1,7 @@
+{
+  "why": "the sorting banks - hoppers, comparators, repeaters and dust, buried under the hill",
+  "note": "On 2026-09-13 a house terrace was cut into this volume from above. The surface said grass; the machinery was one to three blocks underneath. 16 hoppers, 4 comparators, 2 repeaters, 2 redstone torches and 10 dust went with it, and the machine had to be rebuilt from scratch. Coordinates are relative to the blueprint's own corner, so this travels with the file.",
+  "protect": [
+    { "from": { "x": 28, "y": 3, "z": 27 }, "to": { "x": 83, "y": 13, "z": 111 }, "why": "the 280 filter hoppers and their comparator chains" }
+  ]
+}
