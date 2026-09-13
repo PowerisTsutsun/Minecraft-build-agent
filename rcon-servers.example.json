@@ -1,9 +1,10 @@
 {
-  "_comment": "Works as-is against the compose.yml in this repo - setup.sh writes the two values it needs (RCON_PASSWORD, BUILDER) into .env, and ${VAR} references here are resolved from the environment. Copy to rcon-servers.json only if you need more than one server or want to hand-edit. `allow` is REQUIRED: RCON is console-level, so anyone on that list can /fill anything - an unset BUILDER leaves it empty and the bot refuses every builder rather than opening the console to the world. `operators` may remove other people's builds (defaults to the first allow entry). `log` and the world dir are paths INSIDE the bot container - see compose.yml. `readVersion` is the minecraft-data registry used to read schematics (see src/version.js).",
+  "_comment": "Works as-is against the compose.yml in this repo - setup.sh writes the two values it needs (RCON_PASSWORD, BUILDER) into .env, and ${VAR} references here are resolved from the environment. Copy to rcon-servers.json only if you need more than one server or want to hand-edit. `access` decides who may drive the bot: \"ops\" (default) is anyone the server has opped, \"everyone\" is any player in chat, \"allow\" is only the listed names. RCON is console-level, so whoever may build may also clear a volume of someone's world - \"everyone\" is for worlds where you trust everyone who can join. `allow` is additive in every mode, which is how a non-OP gets access without being opped; with no ops.json and an empty allow list the bot refuses everybody. `operators` may remove other people's builds (defaults to the server's ops). `password` may be ${ENV_VAR}. `log` and the world dir are paths INSIDE the bot container - see compose.yml. ops.json is found beside the logs directory unless `ops` names it. `readVersion` is the minecraft-data registry used to read blueprints (see src/version.js).",
   "mc": {
     "host": "127.0.0.1",
     "port": 25575,
     "password": "${RCON_PASSWORD}",
+    "access": "ops",
     "allow": [
       "${BUILDER}"
     ],

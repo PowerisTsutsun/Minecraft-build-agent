@@ -55,27 +55,20 @@ try {
 // log drives a console socket. The old guard only engaged when cfg.allow was an
 // array, and the shipped example defines none - so the default was "everyone".
 // Fail closed instead, and say clearly why when nothing is configured.
-let warnedNoAllow = false
-function isAllowed (player) {
-  const list = cfg.allow
-  if (!Array.isArray(list) || list.length === 0) {
-    if (!warnedNoAllow) {
-      warnedNoAllow = true
-      console.error(`[bot] no "allow" list for server "${serverName}" in rcon-servers.json - refusing every builder.`)
-      console.error('[bot] add e.g.  "allow": ["YourName"]  to that entry and restart.')
-    }
-    return false
-  }
-  return list.includes(player)
-}
+// Who may drive the bot - see src/rcon/access.js. Three modes: "ops" (the
+// default: anyone the server has opped), "everyone", and "allow" (only the
+// listed names). The allow list is additive in every mode, which is how a
+// non-OP gets access without being opped.
+//
+// Re-read per command inside access.js, so /op and /deop take effect without a
+// restart. The notes are printed once, at startup, because a policy that
+// silently resolved to something other than what was configured is exactly the
+// failure that leaves someone typing at a bot that ignores them.
+const access = require('../src/rcon/access').policy(cfg, serverName)
+for (const line of access.notes) console.error(line)
 
-// Operators may remove other people's builds. Defaults to the first allow entry
-// when not set, so a single-player setup needs no extra config.
-function isOperator (player) {
-  const ops = Array.isArray(cfg.operators) ? cfg.operators
-    : (Array.isArray(cfg.allow) && cfg.allow.length ? [cfg.allow[0]] : [])
-  return ops.includes(player)
-}
+const isAllowed = player => access.isAllowed(player)
+const isOperator = player => access.isOperator(player)
 
 const CHAT = /\]: (?:\[Not Secure\] )?<([^>]+)> (.+?)\s*$/
 let rcon = null

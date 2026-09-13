@@ -126,6 +126,28 @@ Everything lives in `.env`, which `setup.sh` writes:
 | `MC_DATA_VERSION` | `26.1` | minecraft-data registry used to read files — see `src/version.js` for why this is not the server version |
 | `MC_BLUEPRINT_DIR` | `./blueprints` | |
 
+### Who may build
+
+RCON is console-level: whoever the bot obeys is issuing `/fill` as the server itself. So `access` in `rcon-servers.json` decides, and it has three settings:
+
+| `access` | who may build |
+|---|---|
+| `"ops"` *(default)* | anyone the server has opped. Add the bot to a server and every OP can use it |
+| `"everyone"` | any player in chat. For a private world, or friends you trust with the console |
+| `"allow"` | only the names in `allow`. The tightest setting |
+
+**`allow` is additive in every mode** — a name on it may always build, opped or not. That is how you give one friend access without opping them.
+
+Three ways people actually run this:
+
+- **Your own single-player world.** `setup.sh` puts your name in `.env`; you are on the allow list and it works whether or not you are opped.
+- **Your server, for your staff.** Leave `access` at `"ops"`. `/op someone` and they can build; `/deop` and they cannot. Takes effect immediately — the bot re-reads `ops.json`, it does not cache it until restart.
+- **Your server, for everyone.** Set `"access": "everyone"`. The bot says so in its startup log, because discovering this mode by being griefed is not how anyone should find out.
+
+`/remove` and `/undo` of *someone else's* build additionally require being an operator — the server's ops, or an explicit `operators` list.
+
+**How OP status is known:** vanilla has no command that reports it — not `/data get`, not a selector. The server's `ops.json` is the only source of truth, so the bot reads it read-only. It lives beside `logs/`, which is why `compose.yml` mounts the whole server data directory rather than just `logs/` and `world/`. Without that mount the bot falls back to the allow list and prints exactly what to add; it never falls open.
+
 **`rcon-servers.json` is optional.** The committed `rcon-servers.example.json` is a working config, not a template to fill in: `${RCON_PASSWORD}` and `${BUILDER}` in it are resolved from the environment, so a fresh clone runs with nothing copied and nothing hand-edited. Copy it to `rcon-servers.json` only when you want a second server or different paths — the bot prefers that file when it exists. `log` and the world directory are paths *inside the bot container*; see `compose.yml`.
 
 An unresolved `${BUILDER}` is dropped from the allow list rather than taken as a literal name, so a missing setting can only ever lock you out — never let someone in.
@@ -133,7 +155,7 @@ An unresolved `${BUILDER}` is dropped from the allow list rather than taken as a
 ## Tests
 
 ```sh
-docker compose exec bot npm test     # 6 files, 120 checks, no server needed
+docker compose exec bot npm test     # 7 files, 145 checks, no server needed
 ```
 
 ## Layout
@@ -141,7 +163,7 @@ docker compose exec bot npm test     # 6 files, 120 checks, no server needed
 ```
 setup.sh                 one command from a fresh clone to a bot waiting for !build
 tools/rcon-bot.js        the bot: tails the log, answers in chat, places builds
-src/rcon/                rcon client, server config, fill batching, clear pass, region reader, journal
+src/rcon/                rcon client, server config, access policy, fill batching, clear pass, region reader, journal
 src/building/            schematic loading (v2/v3/litematic), name resolution, catalogue upkeep,
                          block specs, fill phases, templates
 tools/                   catalog, naming, advancements, extract-setup, load/label-sorter, rcon-export

@@ -50,12 +50,17 @@ services:
       BUILDER: ${BUILDER:-}
     volumes:
       - ./:/app
-      # RCON can send commands but cannot receive chat, so the bot tails the
-      # server log for "<Player> !build ..." and answers with /tellraw. And no
-      # command reports what block is at a position, so reading a build means
-      # reading the world's region files. Both read-only, on purpose.
-      - ./server/data/logs:/servers/mc/logs:ro
-      - ./server/data/world:/servers/mc/world:ro
+      # The server's data directory, read-only. Three things are read from it,
+      # and none of them can be got any other way:
+      #   logs/   - RCON can send commands but cannot receive chat, so the bot
+      #             tails the log for "<Player> !build ..." and answers by
+      #             /tellraw.
+      #   world/  - no command reports what block is at a position, so reading
+      #             a build means reading the region files.
+      #   ops.json - vanilla has no command that reports whether a player is an
+      #             operator, and "anyone this server ops may build" is the
+      #             default access policy.
+      - ./server/data:/servers/mc:ro
     command: sh -c "npm install --omit=dev && npm start"
     depends_on:
       - mc
