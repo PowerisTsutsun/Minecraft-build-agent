@@ -2,12 +2,10 @@
 
 // Footprint arithmetic, with no dependencies.
 //
-// This lived in placer.js, whose first two lines pull in mineflayer-pathfinder
-// and src/config.js. The live RCON bot needs exactly these fifteen lines and
-// nothing else from that module, so requiring it dragged the whole retired
-// mineflayer stack into the running process - which is why `npm install
-// --omit=dev` has to fetch it in production and why eight advisories in the
-// mineflayer subtree cannot simply be dropped.
+// Split out of the old walking placer, which pulled mineflayer-pathfinder in at
+// require time and dragged the whole networking stack into any process that
+// wanted one pure function. That placer is gone; the split stays because
+// footprint maths belongs with the blocks, not with whatever places them.
 
 // -> { width, depth, height, lo, hi } over an array of { pos: {x,y,z} }.
 function footprintOf (blocks) {

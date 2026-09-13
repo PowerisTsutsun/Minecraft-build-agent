@@ -8,8 +8,65 @@
 //   - It has to actually save commands, or the whole exercise is pointless.
 
 const { Vec3 } = require('vec3')
-const primitives = require('../src/building/primitives')
 const { toBoxes, fillCommand } = require('../src/building/commander')
+
+// ---------------------------------------------------------------------------
+// Fixtures. These used to come from the plan primitives, which went with the
+// natural-language planner - but the merger under test never cared where a
+// block list came from, only what shape it is. Kept here verbatim because the
+// shapes are the point: a flat slab, a hollow shell, a ragged curve and a
+// mixed-material overlay each break a different merge assumption.
+// ---------------------------------------------------------------------------
+
+const HALF = 0.5
+const circleLimit = r => (r + HALF) * (r + HALF)
+
+function floor ({ width, depth, material, y = 0 }) {
+  const blocks = []
+  for (let x = 0; x < width; x++) {
+    for (let z = 0; z < depth; z++) blocks.push({ pos: new Vec3(x, y, z), name: material })
+  }
+  return blocks
+}
+
+function box ({ width, depth, height, material, hollow = true, y = 0 }) {
+  const blocks = []
+  for (let h = 0; h < height; h++) {
+    const isCap = h === 0 || h === height - 1
+    for (let x = 0; x < width; x++) {
+      for (let z = 0; z < depth; z++) {
+        const isPerimeter = x === 0 || x === width - 1 || z === 0 || z === depth - 1
+        if (hollow && !isCap && !isPerimeter) continue
+        blocks.push({ pos: new Vec3(x, y + h, z), name: material })
+      }
+    }
+  }
+  return blocks
+}
+
+function sphere ({ radius, material, hollow = true, y = 0 }) {
+  const blocks = []
+  const r = Math.max(1, Math.floor(radius))
+  const limit = circleLimit(r)
+  const inside = (x, yy, z) => (x * x + yy * yy + z * z) <= limit
+
+  for (let dy = -r; dy <= r; dy++) {
+    for (let dx = -r; dx <= r; dx++) {
+      for (let dz = -r; dz <= r; dz++) {
+        if (!inside(dx, dy, dz)) continue
+        if (hollow) {
+          const solidShell =
+            inside(dx + 1, dy, dz) && inside(dx - 1, dy, dz) &&
+            inside(dx, dy + 1, dz) && inside(dx, dy - 1, dz) &&
+            inside(dx, dy, dz + 1) && inside(dx, dy, dz - 1)
+          if (solidShell) continue
+        }
+        blocks.push({ pos: new Vec3(dx + r, y + dy + r, dz + r), name: material })
+      }
+    }
+  }
+  return blocks
+}
 
 let failures = 0
 function check (name, ok, detail) {
@@ -56,17 +113,24 @@ function verify (label, blocks) {
   return boxes
 }
 
-verify('floor 9x9', primitives.floor({ width: 9, depth: 9, material: 'stone' }))
-verify('hollow box 7x7x5', primitives.box({ width: 7, depth: 7, height: 5, material: 'stone_bricks', hollow: true }))
-verify('solid box 5x5x5', primitives.box({ width: 5, depth: 5, height: 5, material: 'stone', hollow: false }))
-verify('house 7x6x4', primitives.house({ width: 7, depth: 6, height: 4, wallBlock: 'stone_bricks', floorBlock: 'oak_planks', roofBlock: 'cobblestone' }))
-const sphereBoxes = verify('hollow sphere r6', primitives.sphere({ radius: 6, material: 'glass', hollow: true }))
+verify('floor 9x9', floor({ width: 9, depth: 9, material: 'stone' }))
+verify('hollow box 7x7x5', box({ width: 7, depth: 7, height: 5, material: 'stone_bricks', hollow: true }))
+verify('solid box 5x5x5', box({ width: 5, depth: 5, height: 5, material: 'stone', hollow: false }))
+// Three materials in one plan, the shape a small house makes: stone walls on a
+// plank floor under a cobble lid. Each material merges separately, so the
+// merger has to keep three cuboid sets from stepping on each other.
+verify('walls, floor and roof 7x6x4', [
+  ...box({ width: 7, depth: 6, height: 4, material: 'stone_bricks', hollow: true }),
+  ...floor({ width: 7, depth: 6, material: 'oak_planks' }),
+  ...floor({ width: 7, depth: 6, material: 'cobblestone', y: 3 })
+])
+const sphereBoxes = verify('hollow sphere r6', sphere({ radius: 6, material: 'glass', hollow: true }))
 
 // Mixed-material plan where a later shape overwrites an earlier one - the case
 // that produced the "supersede" logic in the undo log.
 const mixed = [
-  ...primitives.box({ width: 6, depth: 6, height: 4, material: 'stone_bricks', hollow: true }),
-  ...primitives.floor({ width: 6, depth: 6, material: 'glass' }).map(b => ({ pos: b.pos.offset(0, 3, 0), name: b.name }))
+  ...box({ width: 6, depth: 6, height: 4, material: 'stone_bricks', hollow: true }),
+  ...floor({ width: 6, depth: 6, material: 'glass' }).map(b => ({ pos: b.pos.offset(0, 3, 0), name: b.name }))
 ]
 verify('box with a glass ceiling laid over it', mixed)
 

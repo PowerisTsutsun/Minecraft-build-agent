@@ -23,11 +23,13 @@ const { isValidSpec } = require('../building/blockspec')
 // ---------------------------------------------------------------------------
 
 // Vanilla refuses a /forceload add covering more than 256 chunks. commander.js
-// holds the same constant for the mineflayer path; they must not drift.
+// held the same constant for the mineflayer path, which is gone; this is now
+// the only copy.
 const FORCELOAD_CHUNK_LIMIT = 256
 
-// Fill phases live in commander.js so the rcon path and the mineflayer path
-// cannot drift apart on what has to exist before what.
+// Fill phases live in commander.js, where they were once shared with the
+// walking path, so ordering rules stay in one place: what has to exist before
+// what is a fact about Minecraft, not about how the blocks are delivered.
 const { phaseOf } = require('../building/commander')
 
 function boundsOf (cellKeys) {

@@ -1,7 +1,8 @@
 'use strict'
 
 // Offline checks on the RCON build path - the live one, which until now had no
-// tests at all: the 15-file suite covers only the retired mineflayer/LLM code.
+// tests at all: the suite of the day covered only the plan format and the
+// mineflayer path, both since removed.
 //
 // Everything here runs against a fake rcon that records commands and answers
 // them from a script, so no server is touched and no world is written. What is

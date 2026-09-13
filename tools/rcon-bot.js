@@ -32,7 +32,7 @@ const journal = require('../src/rcon/journal')
 const schemMod = require('../src/building/schematic')
 const templates = require('../src/building/templates')
 // bounds.js, not placer.js: the live path needs footprintOf and nothing else,
-// and placer.js pulls in mineflayer-pathfinder at require time.
+// (bounds.js, not the old placer, which pulled mineflayer in at require time).
 const placer = require('../src/building/bounds')
 
 const arg = (n, d = null) => { const i = process.argv.indexOf(`--${n}`); return i === -1 ? d : process.argv[i + 1] }
@@ -79,12 +79,8 @@ async function say (text, colour = 'gray') {
   await rcon.send(`tellraw @a {"text":${JSON.stringify('[Builder] ' + text)},"color":"${colour}"}`)
 }
 
-function aliases () {
-  return JSON.parse(fs.readFileSync(path.join(schemMod.SCHEMATIC_DIR, 'aliases.json'), 'utf8'))
-}
-function aliasNames () {
-  return Object.keys(aliases()).filter(k => !k.startsWith('_'))
-}
+const blueprints = require('../src/building/blueprints')
+const { aliases, aliasNames, resolve } = blueprints
 
 // catalog.json gives every file its dimensions, block count and kind. Re-read
 // per command like aliases.json, so a rebuild shows up without a restart.
@@ -177,7 +173,8 @@ async function loadBlocks (what) {
 async function doBuild (player, args) {
   const first = (args[0] || '').toLowerCase()
   if (!first || first === 'menu' || first === 'help') {
-    await say('Blueprints: !build /<name>  |  !build list  |  add "at x y z" to pick the spot, "dry" to preview, "noclear" to keep what is there')
+    await say('Blueprints: !build <name>  |  !build list  |  add "at x y z" to pick the spot, "dry" to preview, "noclear" to keep what is there')
+    await say('Your own builds: drop a .schem, .schematic or .litematic into schematics/ and build it by its filename - no restart, nothing to edit.')
     await say('Also: !remove (the build you stand in), !undo (last), !export <name> (capture what you are standing in)')
     return
   }
@@ -240,14 +237,22 @@ async function doBuild (player, args) {
     }
     return
   }
-  if (!first.startsWith('/')) return say(`I don't know "${first}". Try !build list.`)
+  // resolve() takes the name with or without its slash, checks aliases.json
+  // first and then the files in schematics/ - see src/building/blueprints.js.
+  const key = first.replace(/^\//, '')
+  const target = resolve(key)
+  if (!target) return say(`No blueprint "${key}". Try !build list, or drop a .schem into schematics/ and build it by its filename.`)
 
-  const key = first.slice(1)
-  // hasOwnProperty, or `!build /constructor` returns an inherited member, passes
-  // this guard, and dies later with "target.startsWith is not a function".
-  const table = aliases()
-  const target = Object.prototype.hasOwnProperty.call(table, key) ? table[key] : null
-  if (!target || typeof target !== 'string') return say(`No blueprint "/${key}". Try !build list.`)
+  // Refuse an over-cap file BEFORE loading it. The same check runs again on the
+  // real block count below, which is the one that counts - but reaching it
+  // means parsing the file first, and the terrain captures in schematics/ run
+  // to 2.2M blocks and fourteen seconds of NBT. Since any file in the folder is
+  // now buildable by its own name, that parse is one chat message away from
+  // anyone. catalog.json already knows the size; ask it first.
+  const known = catalog()[target]
+  if (known && known.blocks > MAX_BLOCKS) {
+    return say(`${target} is ${known.blocks.toLocaleString()} blocks - over the ${MAX_BLOCKS.toLocaleString()} limit (MC_MAX_BLOCKS). Refusing.`, 'red')
+  }
 
   const dry = args.includes('dry')
   const noclear = args.includes('noclear')

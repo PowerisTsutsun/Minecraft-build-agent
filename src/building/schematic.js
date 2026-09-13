@@ -5,20 +5,35 @@ const fsSync = require('fs')
 const path = require('path')
 const { Vec3 } = require('vec3')
 const { specOf } = require('./blockspec')
-const { outsideIn } = require('./primitives')
+
+// Sorts a horizontal slab from its perimeter inward. Written for the walking
+// bot, which had to build a ring and fill toward the middle rather than wall
+// itself off from the blocks it still had to reach. The bot is gone, but the
+// box merger in commander.js was tuned against this order and produces fewer
+// /fill commands with it, so the ordering stays.
+function outsideIn (blocks, width, depth) {
+  const cx = (width - 1) / 2
+  const cz = (depth - 1) / 2
+  return blocks.slice().sort((a, b) => {
+    const da = Math.max(Math.abs(a.pos.x - cx), Math.abs(a.pos.z - cz))
+    const db = Math.max(Math.abs(b.pos.x - cx), Math.abs(b.pos.z - cz))
+    return db - da
+  })
+}
 
 // ---------------------------------------------------------------------------
 // Schematic loading (.schem / .schematic) via prismarine-schematic.
 //
 // Converts a schematic into the same { pos, name } relative-coordinate array
-// every primitive produces, so the placer, dry-run and undo paths need no
+// templates produce, so the fill, dry-run and verify paths need no
 // special case for schematics at all.
 //
 // Two conversions matter:
 //
 //   - Schematics store an arbitrary origin (often negative). We rebase every
 //     block against the schematic's own minimum corner so the result is
-//     non-negative and origin-anchored, matching the primitives' contract.
+//     non-negative and origin-anchored: the origin is the near-bottom-left
+//     corner, the contract every loader and template shares.
 //   - Block *states* are carried through as full specs (specOf), so a
 //     schematic's stairs keep the way they face. The walking placer cannot
 //     honour that, but the command/fill path can, and that is the live one.
@@ -122,9 +137,8 @@ function schematicToBlocks (schematic) {
     }
   }
 
-  // Bottom-up, and each layer outside-in, for the same reason the primitives
-  // do it: the placer can only click a face that already has a solid neighbor,
-  // and the bot must never strand itself over a hole it still has to fill.
+  // Bottom-up, and each layer outside-in - see outsideIn above for why the
+  // ordering outlived the bot that needed it.
   const width = end.x - start.x + 1
   const depth = end.z - start.z + 1
   const blocks = []

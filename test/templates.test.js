@@ -1,15 +1,14 @@
 'use strict'
 
-// Templates and the classifier. The point of both is that a build which has to
-// WORK is never invented: a language model will produce something farm-shaped
-// that makes no iron and report success, because nothing downstream can tell a
-// hopper in the right place from a hopper one block over.
+// The template registry. The point of a template is that a build which has to
+// WORK is placed from a capture of one that did, never assembled block by
+// block: nothing downstream can tell a hopper in the right place from a hopper
+// one block over, so a farm-shaped thing that makes no iron reports success.
 
 const fs = require('fs')
 const path = require('path')
 const { Vec3 } = require('vec3')
 const templates = require('../src/building/templates')
-const classify = require('../src/pipeline/classify')
 
 let failures = 0
 function check (name, ok, detail) {
@@ -17,34 +16,12 @@ function check (name, ok, detail) {
   if (!ok) failures++
 }
 
-// --- the classifier --------------------------------------------------------
-const cases = [
-  ['an iron farm', 'functional'],
-  ['a mob grinder', 'functional'],
-  ['an automatic item sorter', 'functional'],
-  ['a villager trading hall', 'functional'],
-  ['a creeper farm', 'functional'],
-  // These name farms and are buildings: a barn is architecture.
-  ['a farmhouse with a barn', 'architectural'],
-  ['a windmill on a hill', 'architectural'],
-  ['a granary', 'architectural']
-]
-for (const [request, want] of cases) {
-  const got = classify.byKeyword(request)
-  check(`classify: "${request}" is ${want}`, got && got.kind === want,
-    got ? got.kind : 'no keyword matched')
-}
-check('classify: an ordinary building is left to the model',
-  classify.byKeyword('a gothic keep with two towers') === null)
-
 // --- the registry ----------------------------------------------------------
 // iron_farm is no longer a scaffold: it was exported from a farm on the
 // sandbox that was producing iron (53 ingots in the chest when captured). These
 // used to assert the opposite and correctly failed the moment that happened.
 check('templates: iron_farm has a .schem and is placeable',
   templates.list().includes('iron_farm'), templates.list().join(','))
-check('templates: iron_farm is matched by a plain request',
-  classify.matchTemplate('build me an iron farm') === 'iron_farm')
 check('templates: iron_farm carries its entities in setup.txt',
   templates.describe('iron_farm').setup.length === 4,
   `${templates.describe('iron_farm').setup.length} setup commands`)

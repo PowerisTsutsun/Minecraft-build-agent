@@ -42,7 +42,6 @@ services:
       MC_SERVER: "mc"                 # which rcon-servers.json entry to drive
       MC_MAX_BLOCKS: "500000"         # refuse anything bigger; downloaded builds run to ~370k
       RCON_PASSWORD: ${RCON_PASSWORD}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
     volumes:
       - ./:/app
       # RCON can send commands but cannot receive chat, so the bot tails the

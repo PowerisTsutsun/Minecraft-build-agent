@@ -1,19 +1,15 @@
 {
   "name": "mc-builder-bot",
-  "version": "2.0.0",
-  "description": "Minecraft building bot for 26.2: places blueprints, farms and sorters over RCON, with catalogue, filter loading and labelling tools",
-  "main": "index.js",
+  "version": "3.0.0",
+  "description": "Minecraft blueprint bot: drop a .schem, .schematic or .litematic into schematics/ and build it in game over RCON. Ships with houses, farms and item sorters.",
+  "main": "tools/rcon-bot.js",
   "private": true,
   "scripts": {
     "start": "node tools/rcon-bot.js",
-    "test": "node test/schematic-v3.test.js && node test/primitives.test.js && node test/boxes.test.js && node test/shapes.test.js && node test/render.test.js && node test/stairs.test.js && node test/decorate.test.js && node test/openings.test.js && node test/architecture.test.js && node test/macros.test.js && node test/palette.test.js && node test/views.test.js && node test/pipeline.test.js && node test/inspector.test.js && node test/templates.test.js && node test/rcon-build.test.js",
+    "test": "node test/schematic-v3.test.js && node test/boxes.test.js && node test/blueprints.test.js && node test/templates.test.js && node test/rcon-build.test.js",
     "catalog": "node tools/catalog.js && node tools/name-schematics.js --write"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.124.0",
-    "mineflayer": "^4.38.0",
-    "mineflayer-collectblock": "^1.6.0",
-    "mineflayer-pathfinder": "^2.4.5",
     "minecraft-data": "^3.112.0",
     "prismarine-schematic": "^1.3.0",
     "vec3": "^0.1.10"

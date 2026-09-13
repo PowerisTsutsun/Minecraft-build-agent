@@ -26,7 +26,7 @@ entities are not blocks and are not in a `.schem`.
 5. Add the `/summon` lines to `setup.txt`, using `~x ~y ~z` offsets from the
    template's origin corner. The examples in that file are the right shape.
 
-After that, `!make an iron farm` places the blocks, runs the setup, and wraps the
+After that, `!build ironfarm1` places the blocks, runs the setup, and wraps the
 whole thing in a decorated shell with the protected region left untouched.
 
 ## Why the protect region matters

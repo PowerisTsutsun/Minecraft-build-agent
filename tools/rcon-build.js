@@ -26,6 +26,7 @@ const { withFrozenTicks } = require('../src/rcon/clear')
 const schem = require('../src/building/schematic')
 const templates = require('../src/building/templates')
 const placer = require('../src/building/bounds')
+const blueprints = require('../src/building/blueprints')
 
 function arg (name, fallback = null) {
   const i = process.argv.indexOf(`--${name}`)
@@ -59,10 +60,15 @@ function target () {
 const flag = name => process.argv.includes(`--${name}`)
 
 function resolveWhat (what) {
+  // A leading slash means "look this name up"; anything else is taken as a
+  // filename or template: spec and passed through. Same resolution the chat
+  // bot uses, so a dropped-in file builds here by its filename too.
   if (what.startsWith('/')) {
-    const aliases = JSON.parse(fs.readFileSync(path.join(schem.SCHEMATIC_DIR, 'aliases.json'), 'utf8'))
-    const hit = aliases[what.slice(1).toLowerCase()]
-    if (!hit) throw new Error(`no blueprint "${what}" - have: ${Object.keys(aliases).filter(k => !k.startsWith('_')).join(' ')}`)
+    const hit = blueprints.resolve(what)
+    if (!hit) {
+      const { named, extra } = blueprints.names()
+      throw new Error(`no blueprint "${what}" - have: ${named.concat(extra).sort().join(' ')}`)
+    }
     return hit
   }
   return what
