@@ -58,19 +58,21 @@ check('servers: an unknown name reports what does exist', (() => {
 
 // --- catalogue staleness ----------------------------------------------------
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'catalogue-test-'))
-process.env.MC_SCHEMATIC_DIR = dir
+process.env.MC_BLUEPRINT_DIR = dir
 const catalogue = require('../src/building/catalogue')
 
 const touch = (file, mtime) => {
-  fs.writeFileSync(path.join(dir, file), '')
-  if (mtime) fs.utimesSync(path.join(dir, file), mtime / 1000, mtime / 1000)
+  const p = path.join(dir, file)
+  fs.mkdirSync(path.dirname(p), { recursive: true })
+  fs.writeFileSync(p, '')
+  if (mtime) fs.utimesSync(p, mtime / 1000, mtime / 1000)
 }
 
 check('stale: an empty folder is not stale',
   catalogue.isStale() === false, 'a fresh clone must not rebuild on every boot')
 
 const now = Date.now()
-touch('house9.schem', now)
+touch('house/house9.schem', now)
 check('stale: a blueprint with no catalogue at all is stale',
   catalogue.isStale() === true)
 
@@ -78,12 +80,12 @@ touch('catalog.json', now + 60000)
 check('stale: a catalogue newer than every file is current',
   catalogue.isStale() === false)
 
-touch('dropped-in.litematic', now + 120000)
-check('stale: a file dropped in after the catalogue makes it stale',
-  catalogue.isStale() === true, 'this is the case the whole feature exists for')
+touch('house/dropped-in.litematic', now + 120000)
+check('stale: a file dropped into a group folder makes it stale',
+  catalogue.isStale() === true, 'a flat scan would miss this - blueprints live in subfolders')
 
 touch('catalog.json', now + 180000)
-touch('notes.txt', now + 240000)
+touch('house/notes.txt', now + 240000)
 check('stale: a non-blueprint file does not trigger a rebuild',
   catalogue.isStale() === false)
 

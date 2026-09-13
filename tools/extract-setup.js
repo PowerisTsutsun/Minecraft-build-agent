@@ -143,7 +143,7 @@ const INTERESTING = /Items|Item|front_text|back_text|SpawnData|SpawnPotentials|p
     `#   ${Object.entries(kinds).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k} ${n}`).join(', ')}`,
     '#',
     '# ~x ~y ~z are offsets from the template origin, resolved at placement by',
-    '# templates.setupCommands(). Positions were checked against the decoded',
+    '# machines.setupCommands(). Positions were checked against the decoded',
     `# blocks: ${matched} landed on their own block, ${mismatched} did not.`,
     ...(converted ? [`#`, `# ${converted} container(s) were upgraded from pre-1.13 item NBT.`] : []),
     ...(legacy ? [`#`, `# ${legacy} container(s) could not be upgraded automatically and are`,

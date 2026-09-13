@@ -1,14 +1,16 @@
 'use strict'
 
-// The template registry. The point of a template is that a build which has to
-// WORK is placed from a capture of one that did, never assembled block by
-// block: nothing downstream can tell a hopper in the right place from a hopper
-// one block over, so a farm-shaped thing that makes no iron reports success.
+// Machines: blueprints that are dead without the contents beside them.
+//
+// A farm's villagers, the zombie in its boat and the 41 items that make a
+// filter hopper a filter are not block data, so no .schem carries them. They
+// live in <name>.setup.txt and are resolved against the placement origin here.
+// Get this wrong and the machine arrives looking perfect and producing nothing.
 
 const fs = require('fs')
 const path = require('path')
 const { Vec3 } = require('vec3')
-const templates = require('../src/building/templates')
+const machines = require('../src/building/machines')
 
 let failures = 0
 function check (name, ok, detail) {
@@ -16,20 +18,25 @@ function check (name, ok, detail) {
   if (!ok) failures++
 }
 
-// --- the registry ----------------------------------------------------------
-// iron_farm is no longer a scaffold: it was exported from a farm on the
-// sandbox that was producing iron (53 ingots in the chest when captured). These
-// used to assert the opposite and correctly failed the moment that happened.
-check('templates: iron_farm has a .schem and is placeable',
-  templates.list().includes('iron_farm'), templates.list().join(','))
-check('templates: iron_farm carries its entities in setup.txt',
-  templates.describe('iron_farm').setup.length === 4,
-  `${templates.describe('iron_farm').setup.length} setup commands`)
-check('templates: the setup summons a zombie WITH its AI (a NoAI one is never registered as hostile)',
-  templates.describe('iron_farm').setup.some(l => /zombie/.test(l) && !/NoAI:1b/.test(l)))
-check('templates: a bad name is refused', (() => {
-  try { templates.describe('../../etc'); return false } catch (err) { return true }
-})())
+// --- a real machine on disk -------------------------------------------------
+// ironfarm1 was exported from a farm on the sandbox that was producing iron -
+// 53 ingots in its chest when it was captured. Its contents live beside it.
+const blueprints = require('../src/building/blueprints')
+const readSetup = entry => fs.readFileSync(entry.setup, 'utf8')
+  .split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#'))
+
+const ironfarm = blueprints.resolve('ironfarm1')
+check('machine: ironfarm1 is in the blueprint folder',
+  Boolean(ironfarm) && ironfarm.group === 'farm', String(ironfarm && ironfarm.group))
+check('machine: its setup.txt sits beside it',
+  Boolean(ironfarm && ironfarm.setup), 'without it the farm arrives as a dead shell')
+const ironSetup = readSetup(ironfarm)
+check('machine: the setup carries its entities', ironSetup.length === 4,
+  `${ironSetup.length} setup commands`)
+check('machine: it summons a zombie WITH its AI (a NoAI one is never registered as hostile)',
+  ironSetup.some(l => /zombie/.test(l) && !/NoAI:1b/.test(l)))
+check('machine: three villagers, one per bed to claim',
+  ironSetup.filter(l => /villager/.test(l)).length === 3)
 
 // --- setup commands --------------------------------------------------------
 // Blocks alone never make a machine work; the entities come from setup.txt, and
@@ -42,7 +49,7 @@ const fake = {
     '/summon minecraft:zombie ~6 ~5 ~6 {NoAI:1b}'
   ]
 }
-const resolved = templates.setupCommands(fake, new Vec3(100, 60, 200))
+const resolved = machines.setupCommands(fake, new Vec3(100, 60, 200))
 check('setup: relative offsets resolve against the placement origin',
   resolved[0].includes('105 62 205') && resolved[1].includes('106 65 206'),
   resolved.join(' | '))
@@ -52,19 +59,19 @@ check('setup: the rest of the command is untouched',
 // Entities sit at fractional positions. The iron farm's boat is at ~2.5 ~2 ~5.7,
 // and an integer-only pattern passed that line through UNRESOLVED - so the bot
 // would have summoned the boat relative to its own feet, not the template.
-const boat = templates.setupCommands(
+const boat = machines.setupCommands(
   { setup: ['/summon minecraft:oak_boat ~2.5 ~2 ~5.7 {Passengers:[{id:"minecraft:zombie"}]}'] },
   new Vec3(1908, -59, 1105))[0]
 check('setup: fractional offsets resolve too',
   boat.includes('1910.5 -57 1110.7'), boat.slice(0, 60))
 check('setup: no unresolved ~ survives', !/~/.test(boat))
 // And the real template's setup must have nothing left unresolved either.
-const realSetup = templates.setupCommands(templates.describe('iron_farm'), new Vec3(0, 0, 0))
-check('iron_farm: every setup line resolves fully', realSetup.every(l => !/~/.test(l)),
+const realSetup = machines.setupCommands({ setup: ironSetup }, new Vec3(0, 0, 0))
+check('ironfarm1: every setup line resolves fully', realSetup.every(l => !/~/.test(l)),
   realSetup.filter(l => /~/.test(l)).join(' | '))
 
 // --- the protect region ----------------------------------------------------
-const guarded = templates.protectedCells(fake, new Vec3(10, 0, 10))
+const guarded = machines.protectedCells(fake, new Vec3(10, 0, 10))
 check('protect: covers the declared box',
   guarded.size === 3 * 2 * 3, `${guarded.size}`)
 check('protect: is in world coordinates',
@@ -72,11 +79,6 @@ check('protect: is in world coordinates',
   [...guarded].slice(0, 3).join(' '))
 check('protect: a decorator cell outside it is not protected',
   !guarded.has('13,0,13'))
-
-// --- the shipped scaffold --------------------------------------------------
-const dir = path.join(templates.DIR, 'iron_farm')
-check('iron_farm: setup summons three villagers with beds to claim',
-  templates.describe('iron_farm').setup.filter(l => /villager/.test(l)).length === 3)
 
 // The bug that made the first placed copy a dead farm: block STATES were
 // dropped, so every bed landed as a default unpaired foot facing north and

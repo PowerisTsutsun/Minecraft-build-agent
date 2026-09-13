@@ -39,7 +39,12 @@ function outsideIn (blocks, width, depth) {
 //     honour that, but the command/fill path can, and that is the live one.
 // ---------------------------------------------------------------------------
 
-const SCHEMATIC_DIR = process.env.MC_SCHEMATIC_DIR || path.join(__dirname, '..', '..', 'schematics')
+// Kept as a fallback for direct callers (tools that take a bare filename).
+// The bot resolves names through src/building/blueprints.js and passes an
+// absolute path, because the folder is now blueprints/<group>/<name>.<ext> and
+// a basename alone no longer says where a file lives.
+const SCHEMATIC_DIR = process.env.MC_BLUEPRINT_DIR ||
+  process.env.MC_SCHEMATIC_DIR || path.join(__dirname, '..', '..', 'blueprints')
 
 // Blueprints are downloaded from the internet and dropped in by hand - that is
 // the documented workflow - and `!build /<alias>` decompresses one straight from
@@ -72,14 +77,31 @@ async function listSchematics () {
 }
 
 function resolveSchematicPath (name) {
-  // Names come from chat, so keep them inside the schematics dir - no
+  // An absolute path inside the blueprint folder is what blueprints.js hands
+  // over - it already resolved the name to a real file and checked it is one
+  // of ours. Anything else is treated as a bare name from a tool's --what flag.
+  if (path.isAbsolute(name)) {
+    const resolved = path.resolve(name)
+    if (resolved.startsWith(path.resolve(SCHEMATIC_DIR) + path.sep) && fsSync.existsSync(resolved)) return resolved
+    throw new Error(`refusing a path outside ${SCHEMATIC_DIR}: ${name}`)
+  }
+  // Names come from chat, so keep them inside the blueprint dir - no
   // ../../etc/passwd, no absolute paths.
   const safe = path.basename(name)
   if (/\.(schem|schematic|litematic)$/i.test(safe)) return path.join(SCHEMATIC_DIR, safe)
-  // Bare name: prefer .schem, then .schematic, then .litematic.
-  for (const ext of ['schem', 'schematic', 'litematic']) {
-    const candidate = path.join(SCHEMATIC_DIR, `${safe}.${ext}`)
-    if (fsSync.existsSync(candidate)) return candidate
+  // Bare name: prefer .schem, then .schematic, then .litematic - at the top
+  // level, then in any group folder, since that is where blueprints live now.
+  const dirs = [SCHEMATIC_DIR]
+  try {
+    for (const e of fsSync.readdirSync(SCHEMATIC_DIR, { withFileTypes: true })) {
+      if (e.isDirectory() && !e.name.startsWith('.')) dirs.push(path.join(SCHEMATIC_DIR, e.name))
+    }
+  } catch (err) { /* no folder yet */ }
+  for (const dir of dirs) {
+    for (const ext of ['schem', 'schematic', 'litematic']) {
+      const candidate = path.join(dir, `${safe}.${ext}`)
+      if (fsSync.existsSync(candidate)) return candidate
+    }
   }
   return path.join(SCHEMATIC_DIR, `${safe}.schem`)
 }

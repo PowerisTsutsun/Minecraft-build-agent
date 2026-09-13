@@ -61,10 +61,10 @@ function defaultItems (registry, need) {
 }
 
 // The list a sorter is actually charged with. Precedence: --items <file>, then
-// the committed schematics/sorter-items.txt (edit that to change what goes
+// the committed blueprints/sorter/sorter1.items.txt (edit that to change what goes
 // where - the order is the order the item stream meets the filters), then the
 // generated default. Unobtainable items are dropped from every source.
-const DEFAULT_LIST = path.join(__dirname, '..', 'schematics', 'sorter-items.txt')
+const DEFAULT_LIST = path.join(__dirname, '..', 'blueprints', 'sorter', 'sorter1.items.txt')
 
 // A filter hopper is a hopper with a comparator reading it.
 function isFilterAt (cmp, x, y, z) {

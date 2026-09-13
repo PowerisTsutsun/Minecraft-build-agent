@@ -2,100 +2,135 @@
 
 const fs = require('fs')
 const path = require('path')
-const { SCHEMATIC_DIR } = require('./schematic')
 
 // ---------------------------------------------------------------------------
-// Turning a name someone typed into something loadable.
+// The blueprint folder.
 //
-// Two sources, in order:
+//   blueprints/
+//     house/japanesehouse.schematic     ->  !build /japanesehouse   (group: house)
+//     house/japanesehouse.setup.txt     ->  optional, run after placing
+//     house/japanesehouse.meta.json     ->  optional, ground offset etc.
+//     tower/wizard.litematic            ->  !build /wizard          (group: tower)
 //
-//   1. aliases.json - hand-written, the nice names. A value is either a
-//      filename or "template:<name>", and a template is the only way to get a
-//      build that arrives with its entities and container contents.
-//   2. Whatever is sitting in schematics/. A file dropped in is buildable by
-//      its own filename with nothing else to edit: copy house9.schem in and
-//      "!build house9" works. This is the whole point of the bot - a blueprint
-//      folder, not a registry someone has to maintain.
+// Two rules, and they are the whole system:
 //
-// aliases.json wins a clash, so renaming a file cannot silently change what an
-// existing name builds.
+//   THE FILENAME IS THE NAME. Call the file japanesehouse.schematic and it is
+//   /japanesehouse. Nothing to register, no names file to edit, no restart.
+//   This replaces aliases.json, which existed only because every file was
+//   named after a download id (13305.schematic) and therefore needed a human
+//   name bolted on from the side.
 //
-// SECURITY: the name off chat is only ever looked up as a KEY in these maps. It
-// is never joined onto a path, so "../../etc/passwd" resolves to null rather
-// than reaching outside schematics/. (schematic.js validates again on load; two
-// checks, because this one is the only one that sees the raw chat string.)
+//   THE FOLDER IS THE GROUP. `!build list` groups by folder, so a folder a user
+//   invents - blueprints/ships/ - becomes a section of the list the moment a
+//   file lands in it. The groups are not a fixed vocabulary in the code.
+//
+// A file sitting loose in blueprints/ still works; its group is "other".
 // ---------------------------------------------------------------------------
+
+const ROOT = path.join(__dirname, '..', '..')
+const BLUEPRINT_DIR = process.env.MC_BLUEPRINT_DIR ||
+  process.env.MC_SCHEMATIC_DIR || path.join(ROOT, 'blueprints')
 
 const BLUEPRINT_FILE = /\.(schem|schematic|litematic)$/i
+const UNGROUPED = 'other'
 
-// Both readers run per command, not once at startup, so a file copied in or an
-// alias edited mid-session takes effect without a restart.
-function aliases () {
-  try {
-    return JSON.parse(fs.readFileSync(path.join(SCHEMATIC_DIR, 'aliases.json'), 'utf8'))
-  } catch (err) {
-    // No aliases.json at all is a legitimate setup: a fresh checkout where
-    // someone has only dropped files in. Missing means empty, not broken.
-    if (err.code === 'ENOENT') return {}
-    throw err
-  }
-}
+// A name typed in chat. Deliberately strict: it is used as a KEY in the map
+// built below, never joined onto a path, and this keeps it that way even if a
+// future caller forgets. No slashes, so no traversal; no dots, so no "..".
+const NAME = /^[a-z0-9][a-z0-9_-]{0,63}$/
 
-// Keys starting with _ are notes to whoever edits the file, not blueprints.
-function aliasNames () {
-  return Object.keys(aliases()).filter(k => !k.startsWith('_'))
-}
+const nameOf = file => file.replace(BLUEPRINT_FILE, '').toLowerCase()
 
-// Every blueprint file in schematics/, keyed by its lowercased basename.
-function dropped () {
-  const found = {}
-  let files = []
-  try { files = fs.readdirSync(SCHEMATIC_DIR) } catch (err) { return found }
-  for (const file of files.sort()) {
-    if (!BLUEPRINT_FILE.test(file)) continue
-    const key = file.replace(BLUEPRINT_FILE, '').toLowerCase()
-    // house9.schem and house9.litematic both want "house9". Sorted above, so
-    // which one wins is stable rather than filesystem order.
-    if (!Object.prototype.hasOwnProperty.call(found, key)) found[key] = file
-  }
-  return found
-}
-
-// A leading slash is optional: /house1 is how the list prints them, house1 is
-// what someone types after dropping house1.schem in.
+// Everything in the folder, keyed by name. Read per command rather than cached,
+// so a file copied in mid-session needs no restart.
 //
-// hasOwnProperty throughout, or "/constructor" returns an inherited member,
-// passes the caller's guard, and dies later with "target.startsWith is not a
-// function".
-function resolve (name) {
-  const key = String(name || '').replace(/^\//, '').toLowerCase()
-  if (!key) return null
+// Scans one level of subdirectory. Deeper nesting is ignored rather than
+// flattened: blueprints/house/old/thing.schem almost certainly means "parked",
+// and silently offering it would be a surprise.
+function scan () {
+  const found = new Map()   // name -> the entry a bare name resolves to
+  const all = []            // every blueprint, including shadowed ones
+  const clashes = []
 
-  const table = aliases()
-  if (Object.prototype.hasOwnProperty.call(table, key) && typeof table[key] === 'string') {
-    return table[key]
+  const addFile = (group, dir, file) => {
+    if (!BLUEPRINT_FILE.test(file)) return
+    const name = nameOf(file)
+    if (!NAME.test(name)) return
+    const entry = {
+      name,
+      group,
+      file,
+      path: path.join(dir, file),
+      // A machine that needs its entities and container contents to work keeps
+      // them beside it. Without this an iron farm arrives as a dead shell.
+      setup: sidecar(dir, file, '.setup.txt'),
+      meta: sidecar(dir, file, '.meta.json')
+    }
+    all.push(entry)
+    const had = found.get(name)
+    // A shadowed entry stays in `all`: it is still listed, still buildable, and
+    // still reachable as group/name. Dropping it here made the disambiguating
+    // form useless for the one case it exists for.
+    if (had) { clashes.push({ name, kept: had.path, ignored: entry.path }); return }
+    found.set(name, entry)
   }
-  const files = dropped()
-  return Object.prototype.hasOwnProperty.call(files, key) ? files[key] : null
+
+  let top = []
+  try { top = fs.readdirSync(BLUEPRINT_DIR, { withFileTypes: true }) } catch (err) { return { found, all, clashes } }
+
+  // Sorted so a clash resolves the same way on every machine, rather than by
+  // whatever order the filesystem happens to return.
+  for (const e of top.slice().sort((a, b) => a.name.localeCompare(b.name))) {
+    if (e.isDirectory()) {
+      if (e.name.startsWith('.')) continue
+      const dir = path.join(BLUEPRINT_DIR, e.name)
+      let inner = []
+      try { inner = fs.readdirSync(dir).sort() } catch (err) { continue }
+      for (const f of inner) addFile(e.name.toLowerCase(), dir, f)
+    } else {
+      addFile(UNGROUPED, BLUEPRINT_DIR, e.name)
+    }
+  }
+  return { found, all, clashes }
 }
 
-// Everything buildable, for the list and for error messages: alias names, plus
-// dropped files that no alias already covers.
-//
-// "Covers" has to mean the FILE, not the name. /house1 points at
-// 31497.litematic, so listing 31497 as well offers the same build twice under a
-// name nobody chose - and inflated the count of un-named files from 10 to 45.
-function names () {
-  const table = aliases()
-  const named = aliasNames()
-  const coveredNames = new Set(named.map(n => n.toLowerCase()))
-  const coveredFiles = new Set(
-    named.map(n => table[n]).filter(v => typeof v === 'string' && !v.startsWith('template:'))
-  )
-  const files = dropped()
-  const extra = Object.keys(files)
-    .filter(k => !coveredNames.has(k) && !coveredFiles.has(files[k]))
-  return { named, extra }
+// <name>.schem -> <name>.setup.txt, when it exists.
+function sidecar (dir, file, suffix) {
+  const p = path.join(dir, file.replace(BLUEPRINT_FILE, '') + suffix)
+  return fs.existsSync(p) ? p : null
 }
 
-module.exports = { aliases, aliasNames, dropped, resolve, names, BLUEPRINT_FILE }
+// Resolve a name typed in chat. The leading slash is optional, and a
+// "group/name" form disambiguates when two folders hold the same name.
+function resolve (typed) {
+  const raw = String(typed || '').replace(/^\//, '').toLowerCase().trim()
+  if (!raw) return null
+
+  const { found, all } = scan()
+
+  if (raw.includes('/')) {
+    const [group, name] = raw.split('/', 2)
+    if (!NAME.test(name || '')) return null
+    return all.find(e => e.group === group && e.name === name) || null
+  }
+  if (!NAME.test(raw)) return null
+  return found.get(raw) || null
+}
+
+// Everything buildable, grouped by folder, for !build list.
+function groups () {
+  const { all, clashes } = scan()
+  const out = {}
+  for (const e of all) (out[e.group] = out[e.group] || []).push(e)
+  for (const list of Object.values(out)) {
+    list.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }))
+  }
+  return { groups: out, clashes, total: all.length }
+}
+
+const names = () => [...scan().found.keys()].sort()
+
+module.exports = {
+  resolve, groups, names, scan,
+  BLUEPRINT_DIR, BLUEPRINT_FILE, UNGROUPED, NAME
+}

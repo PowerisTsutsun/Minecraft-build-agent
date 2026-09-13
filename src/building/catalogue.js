@@ -3,47 +3,48 @@
 const fs = require('fs')
 const path = require('path')
 const { spawn } = require('child_process')
-const { SCHEMATIC_DIR } = require('./schematic')
-const { BLUEPRINT_FILE } = require('./blueprints')
+const { BLUEPRINT_FILE, BLUEPRINT_DIR } = require('./blueprints')
 
 const ROOT = path.join(__dirname, '..', '..')
 
 // ---------------------------------------------------------------------------
-// Keeping schematics/catalog.json and aliases.json current without anyone
-// asking.
+// Keeping blueprints/catalog.json current without anyone asking.
 //
-// A dropped-in file is buildable by its own filename the moment it lands, but
-// until the catalogue is rebuilt it has no friendly name, no size in the
-// hover text and no line in !build list. Rebuilding was `npm run catalog` -
-// which needs a node on the HOST, and the whole promise of this repo is that
-// Docker is the only requirement. So the bot does it itself.
+// A dropped-in file is buildable and listed the moment it lands - the folder
+// is the source of truth. What it does NOT have until the catalogue is rebuilt
+// is its size and block count in the hover text. Rebuilding was
+// `npm run catalog`, which needs a node on the HOST, and the whole promise of
+// this repo is that Docker is the only requirement. So the bot does it itself.
 //
-// Both steps are existing command-line tools rather than functions, so they are
-// spawned rather than required: requiring them would run them at import time
-// and there is nothing to import back. They are also deliberately re-run as
-// whole passes rather than incrementally - catalog.js reads every file to get
-// dimensions and a palette, and a wrong incremental result would be worse than
-// a slow correct one.
-//
-// Safe to run unattended: name-schematics.js never touches an alias that
-// already exists, and skips terrain, unreadable files, and the raw captures
-// behind templates (whose setup.txt is the whole point of them).
+// catalog.js is a command-line tool rather than a function, so it is spawned
+// rather than required: requiring it would run it at import time and there is
+// nothing to import back. It is deliberately a whole pass rather than an
+// incremental one - it reads every file to get dimensions and a palette, and a
+// wrong incremental result would be worse than a slow correct one.
 // ---------------------------------------------------------------------------
 
-const CATALOG = path.join(SCHEMATIC_DIR, 'catalog.json')
+const CATALOG = path.join(BLUEPRINT_DIR, 'catalog.json')
 
 // Newest mtime among the blueprint files, or 0 if there are none.
+//
+// Walks the group folders, not just the root. Blueprints live in
+// blueprints/<group>/, so a flat scan here would see nothing and the catalogue
+// would never be rebuilt for the one case this exists for: a file dropped in.
 function newestBlueprint () {
   let newest = 0
-  let files = []
-  try { files = fs.readdirSync(SCHEMATIC_DIR) } catch (err) { return 0 }
-  for (const f of files) {
-    if (!BLUEPRINT_FILE.test(f)) continue
-    try {
-      const t = fs.statSync(path.join(SCHEMATIC_DIR, f)).mtimeMs
-      if (t > newest) newest = t
-    } catch (err) { /* vanished mid-scan; not our problem */ }
+  const look = dir => {
+    let entries = []
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }) } catch (err) { return }
+    for (const e of entries) {
+      if (e.isDirectory()) { if (!e.name.startsWith('.') && dir === BLUEPRINT_DIR) look(path.join(dir, e.name)); continue }
+      if (!BLUEPRINT_FILE.test(e.name)) continue
+      try {
+        const t = fs.statSync(path.join(dir, e.name)).mtimeMs
+        if (t > newest) newest = t
+      } catch (err) { /* vanished mid-scan; not our problem */ }
+    }
   }
+  look(BLUEPRINT_DIR)
   return newest
 }
 
@@ -69,29 +70,17 @@ function run (script, args, onDone) {
   child.on('close', code => onDone(code === 0 ? null : new Error(`${script} exited ${code}`), out))
 }
 
-// Names name-schematics.js reports adding, for the chat line. Its output rows
-// look like:  /house18     31441.schem      25x19x23     1,952 blocks
-const ADDED = /^\s+\/(\S+)\s+\S+\.(?:schem|schematic|litematic)\b/gm
-
 let running = false
 
-// Rebuild, then name anything new. `report(err, addedNames)` is called once.
-// Never throws: a catalogue that failed to rebuild must not stop the bot, since
-// every blueprint is still buildable by filename without it.
+// Rebuild the catalogue. `report(err)` is called once. Never throws: a stale
+// catalogue costs hover text, nothing more - every blueprint still builds.
 function refresh (report) {
-  if (running) return report(null, [])
+  if (running) return report(null)
   running = true
-  const done = (err, names) => { running = false; report(err, names || []) }
-
   run('catalog.js', [], (err, out) => {
-    if (err) return done(new Error(`catalog: ${err.message}\n${out.trim().split('\n').slice(-3).join('\n')}`))
-    run('name-schematics.js', ['--write'], (err2, out2) => {
-      if (err2) return done(new Error(`naming: ${err2.message}`))
-      const names = []
-      let m
-      while ((m = ADDED.exec(out2)) !== null) names.push(m[1])
-      done(null, names)
-    })
+    running = false
+    if (err) return report(new Error(`catalog: ${err.message}\n${out.trim().split('\n').slice(-3).join('\n')}`))
+    report(null)
   })
 }
 

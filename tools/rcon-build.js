@@ -11,9 +11,9 @@ const { DATA_VERSION, SERVER } = require('../src/version')
 // Credentials come from rcon-servers.json (which may say "${RCON_PASSWORD}" so
 // the secret lives in .env). --password still works, but a password on argv is
 // visible in `ps` and in shell history, so prefer --server.
-//   node tools/rcon-build.js ... --what 31497.litematic --at 100 72 -190
+//   node tools/rcon-build.js ... --what blueprints/house/house1.litematic --at 100 72 -190
 //
-// --what takes an aliases.json name (/house1), a schematic filename, or
+// --what takes a blueprint name (/house1), a path to a file, or
 // template:<name>. --player builds at that player's crosshair.
 
 const fs = require('fs')
@@ -24,7 +24,7 @@ const world = require('../src/rcon/world')
 const { fillBlocks, verifySample } = require('../src/rcon/build')
 const { withFrozenTicks } = require('../src/rcon/clear')
 const schem = require('../src/building/schematic')
-const templates = require('../src/building/templates')
+const machines = require('../src/building/machines')
 const placer = require('../src/building/bounds')
 const blueprints = require('../src/building/blueprints')
 const servers = require('../src/rcon/servers')
@@ -57,19 +57,19 @@ function target () {
 }
 const flag = name => process.argv.includes(`--${name}`)
 
+// --what takes a blueprint name (/house1, or house/house1 to disambiguate) or a
+// path to a file that is not in the folder at all. The name form resolves
+// exactly the way chat does, so the console and the bot cannot drift.
 function resolveWhat (what) {
-  // A leading slash means "look this name up"; anything else is taken as a
-  // filename or template: spec and passed through. Same resolution the chat
-  // bot uses, so a dropped-in file builds here by its filename too.
-  if (what.startsWith('/')) {
+  if (what.startsWith('/') && !what.includes('.')) {
     const hit = blueprints.resolve(what)
-    if (!hit) {
-      const { named, extra } = blueprints.names()
-      throw new Error(`no blueprint "${what}" - have: ${named.concat(extra).sort().join(' ')}`)
-    }
+    if (!hit) throw new Error(`no blueprint "${what}" - have: ${blueprints.names().join(' ')}`)
     return hit
   }
-  return what
+  const hit = blueprints.resolve(what)
+  if (hit) return hit
+  // Not a known name: treat it as a file path and let the loader judge it.
+  return { name: what, path: what, file: what, group: 'other', setup: null, meta: null }
 }
 
 ;(async () => {
@@ -79,20 +79,21 @@ function resolveWhat (what) {
   const rcon = await connect(target())
 
   // --- load blocks -------------------------------------------------------
-  let blocks, sink = 0, setup = [], label = what
-  if (what.startsWith('template:')) {
-    const name = what.slice('template:'.length)
-    const info = await templates.load(name, version)
-    blocks = templates.schematicToBlocks(info.schematic).blocks
-    sink = Number(info.meta.ground) || 0
-    setup = info.setup
-    label = `template ${name}`
-  } else {
-    const loaded = await schem.loadSchematic(what, version)
-    blocks = schem.schematicToBlocks(loaded).blocks
-    sink = schem.groundLayers(loaded)
-    label = `schematic ${what}`
+  let setup = []
+  if (what.setup) {
+    setup = fs.readFileSync(what.setup, 'utf8')
+      .split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#'))
   }
+  let meta = {}
+  if (what.meta) {
+    try { meta = JSON.parse(fs.readFileSync(what.meta, 'utf8')) } catch (err) {
+      console.error(`[rcon-build] ignoring ${what.meta}: ${err.message}`)
+    }
+  }
+  const loaded = await schem.loadSchematic(what.path, version)
+  const blocks = schem.schematicToBlocks(loaded).blocks
+  const sink = meta.ground !== undefined ? Number(meta.ground) || 0 : schem.groundLayers(loaded)
+  const label = `${what.name}${setup.length ? ' (+ setup)' : ''}`
   const footprint = placer.footprintOf(blocks)
   console.log(`${label}: ${blocks.length} blocks, ${footprint.width}x${footprint.height}x${footprint.depth}, ground sink ${sink}`)
 
@@ -146,7 +147,7 @@ function resolveWhat (what) {
     for (const b of v.examples) console.log('   ' + b)
 
     if (setup.length) {
-      const cmds = templates.setupCommands({ setup }, origin)
+      const cmds = machines.setupCommands({ setup }, origin)
       console.log(`running ${cmds.length} setup commands`)
       for (const c of cmds) {
         const out = await rcon.send(c)

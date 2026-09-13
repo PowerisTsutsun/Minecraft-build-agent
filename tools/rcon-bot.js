@@ -30,7 +30,7 @@ const MIN_Y = -64
 const MAX_Y = 319
 const journal = require('../src/rcon/journal')
 const schemMod = require('../src/building/schematic')
-const templates = require('../src/building/templates')
+const machines = require('../src/building/machines')
 // bounds.js, not placer.js: the live path needs footprintOf and nothing else,
 // (bounds.js, not the old placer, which pulled mineflayer in at require time).
 const placer = require('../src/building/bounds')
@@ -86,15 +86,17 @@ async function say (text, colour = 'gray') {
 }
 
 const blueprints = require('../src/building/blueprints')
-const { aliases, aliasNames, resolve } = blueprints
+const { resolve } = blueprints
 
-// catalog.json gives every file its dimensions, block count and kind. Re-read
-// per command like aliases.json, so a rebuild shows up without a restart.
+// catalog.json carries dimensions and block counts for the hover text and for
+// the size guard below. Re-read per command, so a rebuild shows up without a
+// restart, and absent is fine - it is metadata, not the source of truth. The
+// folder is.
 function catalog () {
   try {
-    const raw = JSON.parse(fs.readFileSync(path.join(schemMod.SCHEMATIC_DIR, 'catalog.json'), 'utf8'))
+    const raw = JSON.parse(fs.readFileSync(path.join(blueprints.BLUEPRINT_DIR, 'catalog.json'), 'utf8'))
     const by = {}
-    for (const e of raw) by[e.file] = e
+    for (const e of raw) by[e.name || e.file] = e
     return by
   } catch (err) { return {} }
 }
@@ -152,57 +154,77 @@ const KIND_LABEL = {
 // Machines first - they are what someone is usually hunting for - then by size.
 const KIND_ORDER = ['template', 'farm', 'sorter', 'redstone', 'house', 'tower', 'statue', 'build', 'other']
 
-function describeAlias (name, target, cat) {
-  if (target.startsWith('template:')) {
-    return { kind: 'template', detail: target.slice('template:'.length) + ' - carries setup.txt (entities, container contents)' }
-  }
-  const e = cat[target]
-  if (!e) return { kind: 'other', detail: target }
-  const bits = [target]
+// The hover text for one blueprint in the list.
+function describe (entry, cat) {
+  const e = cat[entry.name] || {}
+  const bits = [entry.file]
   if (e.size) bits.push(e.size)
   if (e.blocks) bits.push(e.blocks.toLocaleString() + ' blocks')
-  if (e.meta) bits.push(e.meta)
+  if (entry.setup) bits.push('arrives with its entities and containers loaded (setup.txt)')
   if (e.overCap) bits.push('TOO BIG: ' + e.overCap)
-  return { kind: e.kind || 'other', detail: bits.join('  -  ') }
+  return bits.join('  -  ')
 }
 
-async function loadBlocks (what) {
+// A blueprint is its file plus two optional siblings: <name>.setup.txt, the
+// commands that bring a machine to life, and <name>.meta.json, which can pin
+// how far into the ground it sits. Neither is required, and a plain house has
+// neither.
+async function loadBlocks (entry) {
   const version = cfg.readVersion || DATA_VERSION
-  if (what.startsWith('template:')) {
-    const info = await templates.load(what.slice('template:'.length), version)
-    return { blocks: templates.schematicToBlocks(info.schematic).blocks, sink: Number(info.meta.ground) || 0, setup: info.setup, label: what }
+  const loaded = await schemMod.loadSchematic(entry.path, version)
+
+  let setup = []
+  if (entry.setup) {
+    setup = fs.readFileSync(entry.setup, 'utf8')
+      .split('\n').map(l => l.trim())
+      .filter(l => l && !l.startsWith('#'))
   }
-  const loaded = await schemMod.loadSchematic(what, version)
-  return { blocks: schemMod.schematicToBlocks(loaded).blocks, sink: schemMod.groundLayers(loaded), setup: [], label: what }
+
+  let meta = {}
+  if (entry.meta) {
+    try { meta = JSON.parse(fs.readFileSync(entry.meta, 'utf8')) } catch (err) {
+      console.error(`[bot] ignoring ${entry.meta}: ${err.message}`)
+    }
+  }
+  const sink = meta.ground !== undefined ? Number(meta.ground) || 0 : schemMod.groundLayers(loaded)
+
+  return { blocks: schemMod.schematicToBlocks(loaded).blocks, sink, setup, label: entry.name }
 }
 
 async function doBuild (player, args) {
   const first = (args[0] || '').toLowerCase()
   if (!first || first === 'menu' || first === 'help') {
     await say('Blueprints: !build <name>  |  !build list  |  add "at x y z" to pick the spot, "dry" to preview, "noclear" to keep what is there')
-    await say('Your own builds: drop a .schem, .schematic or .litematic into schematics/ and build it by its filename - no restart, nothing to edit.')
+    await say('Your own builds: drop a .schem, .schematic or .litematic into blueprints/<group>/ - the filename is the name, the folder is the group. No restart, nothing to edit.')
     await say('Also: !remove (the build you stand in), !undo (last), !export <name> (capture what you are standing in)')
     return
   }
   if (first === 'list') {
-    const a = aliases()
     const cat = catalog()
     const want = (args[1] || '').toLowerCase().replace(/^\//, '')
 
+    // Straight from the folder: every directory under blueprints/ is a group,
+    // so a folder someone invents shows up here the moment a file lands in it.
+    const { groups: found, clashes } = blueprints.groups()
     const groups = {}
-    for (const name of aliasNames()) {
-      const { kind, detail } = describeAlias(name, a[name], cat)
-      ;(groups[kind] = groups[kind] || []).push({ name, detail })
+    for (const [group, entries] of Object.entries(found)) {
+      groups[group] = entries.map(e => ({ name: e.name, detail: describe(e, cat) }))
+    }
+    // Two files with the same name in different folders: one of them is
+    // unreachable by bare name, and silence would make that look like a
+    // vanished blueprint.
+    for (const c of clashes) {
+      console.error(`[bot] duplicate blueprint name "${c.name}": using ${c.kept}, ignoring ${c.ignored}`)
     }
     const kinds = KIND_ORDER.filter(k => groups[k])
-    for (const k of Object.keys(groups)) if (!kinds.includes(k)) kinds.push(k)
+    for (const k of Object.keys(groups).sort()) if (!kinds.includes(k)) kinds.push(k)
 
     if (want && !groups[want]) {
       return say(`No group "${want}". Try: ` + kinds.join(', '))
     }
     const shown = want ? [want] : kinds
 
-    const total = aliasNames().length
+    const total = Object.values(groups).reduce((n, g) => n + g.length, 0)
     await sayRich([
       { text: '\u2501\u2501 ', color: 'dark_gray' },
       { text: 'Blueprints', color: 'white', bold: true },
@@ -243,11 +265,11 @@ async function doBuild (player, args) {
     }
     return
   }
-  // resolve() takes the name with or without its slash, checks aliases.json
-  // first and then the files in schematics/ - see src/building/blueprints.js.
+  // resolve() takes the name with or without its slash, and "group/name" when
+  // two folders hold the same name - see src/building/blueprints.js.
   const key = first.replace(/^\//, '')
   const target = resolve(key)
-  if (!target) return say(`No blueprint "${key}". Try !build list, or drop a .schem into schematics/ and build it by its filename.`)
+  if (!target) return say(`No blueprint "${key}". Try !build list, or drop a file into blueprints/<group>/ and build it by its filename.`)
 
   // Refuse an over-cap file BEFORE loading it. The same check runs again on the
   // real block count below, which is the one that counts - but reaching it
@@ -255,9 +277,9 @@ async function doBuild (player, args) {
   // to 2.2M blocks and fourteen seconds of NBT. Since any file in the folder is
   // now buildable by its own name, that parse is one chat message away from
   // anyone. catalog.json already knows the size; ask it first.
-  const known = catalog()[target]
+  const known = catalog()[target.name]
   if (known && known.blocks > MAX_BLOCKS) {
-    return say(`${target} is ${known.blocks.toLocaleString()} blocks - over the ${MAX_BLOCKS.toLocaleString()} limit (MC_MAX_BLOCKS). Refusing.`, 'red')
+    return say(`/${target.name} is ${known.blocks.toLocaleString()} blocks - over the ${MAX_BLOCKS.toLocaleString()} limit (MC_MAX_BLOCKS). Refusing.`, 'red')
   }
 
   const dry = args.includes('dry')
@@ -349,7 +371,7 @@ async function doBuild (player, args) {
   await say(`Done in ${((Date.now() - t0) / 1000).toFixed(1)}s - ${stats.changed} blocks changed${stats.errors ? `, ${stats.errors} commands errored` : ''}. !remove to take it back out.`, 'green')
 
   if (setup.length) {
-    const cmds = templates.setupCommands({ setup }, origin)
+    const cmds = machines.setupCommands({ setup }, origin)
     await say(`running ${cmds.length} setup commands`)
     // rcon-build.js checks these replies; the live bot did not, so a machine
     // whose villagers all failed to summon still reported success.
@@ -451,19 +473,18 @@ async function main () {
   // needed a node on the host, which a Docker-only install has not got. The bot
   // stays usable throughout: this only adds names.
   if (catalogue.isStale() && process.env.MC_NO_AUTOCATALOG !== '1') {
-    console.log('[bot] schematics/ is newer than the catalogue - rebuilding in the background')
-    catalogue.refresh((err, added) => {
+    console.log('[bot] blueprints/ is newer than the catalogue - rebuilding in the background')
+    catalogue.refresh(err => {
       if (err) {
-        // Not fatal, and not silent: every blueprint still builds by filename.
+        // Not fatal, and not silent: the catalogue is hover text, not the
+        // source of truth. Every blueprint still resolves and builds.
         console.error(`[bot] catalogue rebuild failed: ${err.message}`)
-        return say('Could not rebuild the blueprint catalogue - new files still build by filename.', 'yellow')
+        return say('Could not measure the new blueprints - they still build, the list just shows no size.', 'yellow')
           .catch(() => {})
       }
-      console.log(`[bot] catalogue rebuilt${added.length ? ', named: ' + added.join(' ') : ', no new names'}`)
-      if (added.length) {
-        say(`${added.length} new blueprint${added.length > 1 ? 's' : ''} named: ${added.map(n => '/' + n).join(' ')}`, 'green')
-          .catch(() => {})
-      }
+      const { total } = blueprints.groups()
+      console.log(`[bot] catalogue rebuilt - ${total} blueprints`)
+      say(`Blueprint list refreshed - ${total} available. !build list`, 'green').catch(() => {})
     })
   }
 

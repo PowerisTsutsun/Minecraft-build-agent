@@ -1,6 +1,6 @@
 # Minecraft-build-agent
 
-A blueprint bot for a vanilla Minecraft **26.2** server. Drop a `.schem`, `.schematic` or `.litematic` file into `schematics/`, type `!build <name>` in chat, and it appears where you are looking — no client mod, no server mod, no plugin.
+A blueprint bot for a vanilla Minecraft **26.2** server. Drop a `.schem`, `.schematic` or `.litematic` file into `blueprints/house/`, type `!build /japanesehouse` in chat, and it appears where you are looking — no client mod, no server mod, no plugin.
 
 Thirty-nine named blueprints ship with it: sixteen houses, three towers, a colosseum, a taj mahal, statues, iron and gold farms, and a 1,700-hopper item sorter that arrives with its filters loaded.
 
@@ -43,7 +43,8 @@ Re-running `setup.sh` is safe — it only fills in what is missing and never rew
 | `!build list` | every named blueprint, grouped, hover for size, click to fill in |
 | `!build list houses` | one group |
 | `!build house1` | place it where you are looking (the aimed block becomes the min corner) |
-| `!build myhouse` | anything you dropped into `schematics/`, by its filename |
+| `!build japanesehouse` | anything you dropped in, by its filename |
+| `!build house/cottage` | when two folders hold the same name |
 | `!build house1 at 100 70 -50` | place at exact coordinates |
 | `!build house1 dry` | report what would happen, place nothing |
 | `!build house1 noclear` | skip emptying the volume first (see below) |
@@ -55,15 +56,37 @@ Before placing, the bot **clears the volume** the build will occupy. Blueprints 
 
 ## Your own blueprints
 
-Copy `.schem` (Sponge v2 **or v3**), `.schematic` (MCEdit) or `.litematic` files into `schematics/`. That is the whole install step — `mybarn.schem` is buildable as `!build mybarn` immediately, with no restart and nothing to edit. Names are case-insensitive and the leading `/` is optional.
+```
+blueprints/
+  house/      japanesehouse.schematic   ->  !build /japanesehouse
+  tower/      wizard.litematic          ->  !build /wizard
+  ships/      galleon.schem             ->  !build /galleon
+```
 
-**Naming happens by itself.** When the bot starts and finds `schematics/` newer than the catalogue, it rebuilds in the background and announces the new names in chat — `2 new blueprints named: /house18 /tower4`. Nothing to run, and the bot stays usable while it works, because the files already build by filename. Set `MC_NO_AUTOCATALOG=1` to turn that off, or do it yourself at any time:
+Two rules, and they are the whole system:
+
+- **The filename is the name.** Call the file `japanesehouse.schematic` and it is `/japanesehouse`. Nothing to register, no names file to edit, no restart. Names are case-insensitive and the leading `/` is optional.
+- **The folder is the group.** `!build list` groups by folder, so a folder you invent — `blueprints/ships/` — becomes a section of the list the moment a file lands in it. The groups are not a fixed list in the code.
+
+Copy `.schem` (Sponge v2 **or v3**), `.schematic` (MCEdit) or `.litematic` files in and they are buildable immediately. A file loose in `blueprints/` works too; its group is `other`. If two folders hold the same name, the first alphabetically wins a bare `!build /cottage` and `!build /landmark/cottage` reaches the other; the bot logs the clash rather than hiding it.
+
+**Machines keep their contents beside them.** A farm's villagers, the zombie in its boat and the 41 items that make a filter hopper a filter are not block data, so no `.schem` carries them:
+
+```
+blueprints/farm/ironfarm1.schem        the blocks
+blueprints/farm/ironfarm1.setup.txt    /summon and /data merge, run after placing
+blueprints/farm/ironfarm1.meta.json    how far it sits into the ground (optional)
+```
+
+Both sidecars are optional — a plain house has neither.
+
+**Sizes are measured by themselves.** A new file is buildable and listed straight away; what it lacks until the catalogue is rebuilt is its size and block count in the hover text. The bot notices `blueprints/` is newer than the catalogue at startup and rebuilds in the background. Set `MC_NO_AUTOCATALOG=1` to turn that off, or do it yourself:
 
 ```sh
 docker compose exec bot npm run catalog
 ```
 
-`catalog.json` records dimensions, block count, dominant materials and a `kind` (house, tower, statue, farm, sorter, redstone, terrain). `aliases.json` maps friendly names to files — edit it freely, it is re-read on every command, and a name in it always wins over a filename, so renaming a file cannot silently change what an existing name builds. An alias you chose is never renamed or renumbered by the automatic pass. Terrain captures, unreadable files, and anything over `MC_MAX_BLOCKS` get no name, and neither do the raw captures behind templates — those carry no `setup.txt`, so building one gets you a machine that looks right and can never produce.
+`blueprints/catalog.json` records dimensions, block count and dominant materials for the hover text, and lets the bot refuse an over-size build before it spends time parsing it. It is metadata, not the source of truth — the folder is. Deleting it costs hover text and nothing else.
 
 ### Datapack
 
@@ -73,13 +96,13 @@ docker compose exec bot npm run catalog
 
 A downloaded machine is blocks only. Schematics do not carry what is *inside* the blocks — villagers, the zombie in its boat, the 41 items that make a filter hopper a filter — and prismarine-schematic drops even the block-entity data that some files do have. Placed raw, every machine arrives dead, silently.
 
-**Farms** live in `templates/<name>/` as a `.schem` plus a `setup.txt` of `/summon` and `/data merge block` commands that the bot runs after placing. Three ship: `ironfarm1`, `ironfarm2` (with auto-crafter), `goldfarm`. `docker compose exec bot node tools/extract-setup.js --what <file>` writes a `setup.txt` from a schematic's own block entities where it has them.
+**Farms** live in `blueprints/farm/` as a `.schem` plus a `<name>.setup.txt` of `/summon` and `/data merge block` commands the bot runs after placing. Three ship: `ironfarm1`, `ironfarm2` (with auto-crafter), `goldfarm`. `docker compose exec bot node tools/extract-setup.js --what <file>` writes a `setup.txt` from a schematic's own block entities where it has them.
 
 **Sorters** are handled by two tools that share one walk of the hopper network, so a filter's charge and the frame under its chests can never disagree:
 
 ```sh
-docker compose exec bot node tools/load-sorter.js  --what 17071.schem --at 610 59 12 --apply   # 41 target + 4 sticks in every real filter, in flow order
-docker compose exec bot node tools/label-sorter.js --what 17071.schem --at 610 59 12 --apply   # a glow item frame under each chest pair
+docker compose exec bot node tools/load-sorter.js  --what /sorter1 --at 610 59 12 --apply   # 41 target + 4 sticks in every real filter, in flow order
+docker compose exec bot node tools/label-sorter.js --what /sorter1 --at 610 59 12 --apply   # a glow item frame under each chest pair
 docker compose exec bot node tools/load-sorter.js  ... --map                                   # print slot -> item
 docker compose exec bot node tools/load-sorter.js  ... --items my-list.txt                     # your own ordering, one id per line
 ```
@@ -101,7 +124,7 @@ Everything lives in `.env`, which `setup.sh` writes:
 | `MC_MAX_BLOCKS` | `150000` | refuse larger builds (`compose.yml` sets 500000) |
 | `MC_NO_AUTOCATALOG` | unset | `1` stops the bot rebuilding the catalogue by itself |
 | `MC_DATA_VERSION` | `26.1` | minecraft-data registry used to read files — see `src/version.js` for why this is not the server version |
-| `MC_SCHEMATIC_DIR` | `./schematics` | |
+| `MC_BLUEPRINT_DIR` | `./blueprints` | |
 
 **`rcon-servers.json` is optional.** The committed `rcon-servers.example.json` is a working config, not a template to fill in: `${RCON_PASSWORD}` and `${BUILDER}` in it are resolved from the environment, so a fresh clone runs with nothing copied and nothing hand-edited. Copy it to `rcon-servers.json` only when you want a second server or different paths — the bot prefers that file when it exists. `log` and the world directory are paths *inside the bot container*; see `compose.yml`.
 
@@ -110,7 +133,7 @@ An unresolved `${BUILDER}` is dropped from the allow list rather than taken as a
 ## Tests
 
 ```sh
-docker compose exec bot npm test     # 6 files, 117 checks, no server needed
+docker compose exec bot npm test     # 6 files, 120 checks, no server needed
 ```
 
 ## Layout
@@ -122,8 +145,7 @@ src/rcon/                rcon client, server config, fill batching, clear pass, 
 src/building/            schematic loading (v2/v3/litematic), name resolution, catalogue upkeep,
                          block specs, fill phases, templates
 tools/                   catalog, naming, advancements, extract-setup, load/label-sorter, rcon-export
-schematics/              blueprints + catalog.json + aliases.json
-templates/               farms with their setup.txt
+blueprints/<group>/      the blueprints - filename is the name, folder is the group
 docs/                    dev notes and findings
 ```
 

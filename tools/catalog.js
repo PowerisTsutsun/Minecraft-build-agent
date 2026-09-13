@@ -3,7 +3,8 @@
 const { DATA_VERSION, SERVER } = require('../src/version')
 // Inventory every schematic in schematics/: dims, block count, palette, unknowns.
 const fs = require('fs'); const path = require('path'); const { Vec3 } = require('vec3')
-const { loadSchematic, SCHEMATIC_DIR } = require('../src/building/schematic')
+const { loadSchematic } = require('../src/building/schematic')
+const blueprints = require('../src/building/blueprints')
 const registry = require('minecraft-data')(DATA_VERSION)
 
 // ---------------------------------------------------------------------------
@@ -87,12 +88,16 @@ function classify (e) {
 }
 
 ;(async () => {
-  const files = fs.readdirSync(SCHEMATIC_DIR).filter(f => /\.(schem|schematic|litematic)$/i.test(f)).sort()
+  // The folder is the source of truth now: every blueprint under
+  // blueprints/<group>/, keyed by the name the bot answers to.
+  const { groups } = blueprints.groups()
+  const entries = Object.values(groups).flat().sort((a, b) => a.name.localeCompare(b.name))
   const out = []
-  for (const f of files) {
+  for (const bp of entries) {
+    const f = bp.file
     const t0 = Date.now()
     try {
-      const s = await loadSchematic(f, DATA_VERSION)
+      const s = await loadSchematic(bp.path, DATA_VERSION)
       const st = s.start(), en = s.end(); const size = s.size
       const tally = {}; let n = 0; const unknown = new Set(); const parts = {}
       for (let y = st.y; y <= en.y; y++) for (let z = st.z; z <= en.z; z++) for (let x = st.x; x <= en.x; x++) {
@@ -106,12 +111,12 @@ function classify (e) {
       const meta = s.litematic ? `"${s.litematic.name}" by ${s.litematic.author}` : ''
       // Only the parts worth keeping, biggest first - the tail is all ones.
       const partList = Object.entries(parts).sort((a, b) => b[1] - a[1]).slice(0, 12)
-      const entry = { parts: Object.fromEntries(partList), file: f, meta, size: `${size.x}x${size.y}x${size.z}`, blocks: n, palette: Object.keys(tally).length, top, unknown: [...unknown, ...Object.keys((s.litematic && s.litematic.unknown) || {})], ms: Date.now() - t0 }
-      entry.kind = classify(entry)
+      const entry = { parts: Object.fromEntries(partList), name: bp.name, group: bp.group, file: f, meta, size: `${size.x}x${size.y}x${size.z}`, blocks: n, palette: Object.keys(tally).length, top, unknown: [...unknown, ...Object.keys((s.litematic && s.litematic.unknown) || {})], ms: Date.now() - t0 }
+      entry.kind = bp.group
       if (entry.blocks > MAX_BLOCKS) entry.overCap = `${entry.blocks} blocks exceeds MC_MAX_BLOCKS ${MAX_BLOCKS}`
       out.push(entry)
-    } catch (err) { out.push({ file: f, kind: 'unreadable', error: err.message.slice(0, 120) }) }
+    } catch (err) { out.push({ name: bp.name, group: bp.group, file: f, kind: 'unreadable', error: err.message.slice(0, 120) }) }
   }
   for (const o of out) console.log(JSON.stringify(o))
-  fs.writeFileSync(path.join(SCHEMATIC_DIR, 'catalog.json'), JSON.stringify(out, null, 2) + '\n')
+  fs.writeFileSync(path.join(blueprints.BLUEPRINT_DIR, 'catalog.json'), JSON.stringify(out, null, 2) + '\n')
 })()

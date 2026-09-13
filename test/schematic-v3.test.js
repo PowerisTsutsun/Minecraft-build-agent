@@ -16,7 +16,8 @@ const fs = require('fs')
 const path = require('path')
 const nbt = require('prismarine-nbt')
 const sponge3 = require('../src/building/sponge3')
-const { loadSchematic, schematicToBlocks, SCHEMATIC_DIR } = require('../src/building/schematic')
+const { loadSchematic, schematicToBlocks } = require('../src/building/schematic')
+const blueprints = require('../src/building/blueprints')
 
 let failures = 0
 function check (name, ok, detail) {
@@ -24,11 +25,14 @@ function check (name, ok, detail) {
   if (!ok) failures++
 }
 
-const V3 = '22575.schem'      // WorldEdit 7.3.5, cherry/quartz garden house
-const V2 = 'house7.schem'     // a known-good v2, as the negative control
+// The files moved into blueprints/<group>/ and were renamed to their names, so
+// they are looked up the way the bot looks them up rather than by filename.
+const V3 = blueprints.resolve('house13')   // WorldEdit 7.3.5, cherry/quartz garden house
+const V2 = blueprints.resolve('house7')    // a known-good v2, as the negative control
+if (!V3 || !V2) { console.log('FAIL fixtures missing from blueprints/'); process.exit(1) }
 
 async function simplifiedOf (file) {
-  const buf = fs.readFileSync(path.join(SCHEMATIC_DIR, file))
+  const buf = fs.readFileSync(file.path || file)
   const { parsed } = await nbt.parse(buf)
   return nbt.simplify(parsed)
 }
@@ -60,8 +64,8 @@ async function simplifiedOf (file) {
   check('remap leaves the offset at zero', Object.keys(mapped.Metadata).length === 0)
 
   // --- the decode ------------------------------------------------------------
-  const v2pre = await loadSchematic(V2, '26.1')   // baseline for the fidelity check below
-  const s = await loadSchematic(V3, '26.1')
+  const v2pre = await loadSchematic(V2.path, '26.1')   // baseline for the fidelity check below
+  const s = await loadSchematic(V3.path, '26.1')
   check('loaded size matches the NBT header',
     s.size.x === head.Width && s.size.y === head.Height && s.size.z === head.Length,
     `${s.size.x}x${s.size.y}x${s.size.z}`)
