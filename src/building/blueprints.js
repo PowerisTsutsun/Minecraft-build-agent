@@ -81,10 +81,20 @@ function resolve (name) {
 
 // Everything buildable, for the list and for error messages: alias names, plus
 // dropped files that no alias already covers.
+//
+// "Covers" has to mean the FILE, not the name. /house1 points at
+// 31497.litematic, so listing 31497 as well offers the same build twice under a
+// name nobody chose - and inflated the count of un-named files from 10 to 45.
 function names () {
+  const table = aliases()
   const named = aliasNames()
-  const covered = new Set(named.map(n => n.toLowerCase()))
-  const extra = Object.keys(dropped()).filter(k => !covered.has(k))
+  const coveredNames = new Set(named.map(n => n.toLowerCase()))
+  const coveredFiles = new Set(
+    named.map(n => table[n]).filter(v => typeof v === 'string' && !v.startsWith('template:'))
+  )
+  const files = dropped()
+  const extra = Object.keys(files)
+    .filter(k => !coveredNames.has(k) && !coveredFiles.has(files[k]))
   return { named, extra }
 }
 

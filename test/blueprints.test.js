@@ -47,10 +47,12 @@ check('dropped: a non-blueprint file is not buildable',
   blueprints.resolve('notes') === null && blueprints.resolve('catalog') === null)
 
 // --- aliases.json on top ----------------------------------------------------
+write('barn7.schem')
 aliasFile({
   house1: '13305.schematic',
   ironfarm: 'template:iron_farm',
   house9: '13305.schematic',
+  bigbarn: 'barn7.schem',
   _note: 'keys starting with _ are notes, not blueprints'
 })
 check('alias: a name maps to its file', blueprints.resolve('house1') === '13305.schematic')
@@ -67,6 +69,14 @@ check('names: aliases are listed', named.includes('house1') && named.includes('i
 check('names: a dropped file with no alias is listed too', extra.includes('tower'))
 check('names: a dropped file an alias already covers is not listed twice',
   !extra.includes('house9'), extra.join(','))
+// The case above only proves the NAME is deduped - house9.schem happens to be
+// called house9. barn7.schem is reached as /bigbarn, so nothing about the two
+// strings matches and only a file comparison can catch it. Getting this wrong
+// offered every named build a second time under its raw filename.
+check('names: coverage is by file, not by matching name',
+  !extra.includes('barn7'), extra.join(','))
+check('names: an alias pointing at a missing file does not hide a real one',
+  extra.includes('old_barn'), extra.join(','))
 
 // --- names that are not names ----------------------------------------------
 // The chat string is a key, never a path fragment. If any of these ever
