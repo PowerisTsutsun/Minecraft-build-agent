@@ -1,4 +1,4 @@
-# minecraft-build-agent-26.2
+# Minecraft-build-agent
 
 A blueprint bot for a vanilla Minecraft **26.2** server. Drop a `.schem`, `.schematic` or `.litematic` file into `schematics/`, type `!build <name>` in chat, and it appears where you are looking — no client mod, no server mod, no plugin.
 
@@ -16,8 +16,8 @@ No API key, no account, no network access beyond the server itself.
 ## Quick start
 
 ```sh
-git clone https://github.com/PowerisTsutsun/minecraft-build-agent-26.2
-cd minecraft-build-agent-26.2
+git clone https://github.com/PowerisTsutsun/Minecraft-build-agent
+cd Minecraft-build-agent
 ./setup.sh YourMinecraftName
 ```
 
