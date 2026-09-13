@@ -45,7 +45,7 @@ for (const [name, file] of Object.entries(ALIASES)) {
   const kind = /^([a-z]+?)\d*$/.exec(name)
   if (kind) NAMED.set(file, kind[1])
 }
-const ALIAS_KIND = { colosseum: 'build', town: 'build', garden: 'build', shop: 'redstone', enchantroom: 'redstone', ironfarm: 'farm', goldfarm: 'farm' }
+const ALIAS_KIND = { colosseum: 'build', town: 'build', garden: 'build', enchantroom: 'redstone', ironfarm: 'farm', goldfarm: 'farm' }
 
 function classify (e) {
   if (e.error) return 'unreadable'

@@ -71,13 +71,6 @@ for (const e of catalog.slice().sort((a, b) => (a.blocks || 0) - (b.blocks || 0)
   added.push({ name, e })
 }
 
-// docs/dev-notes-2026-09-06.md, open issue #2: /shop1 is an enchanting room.
-if (aliases.shop1 && !aliases.enchantroom) {
-  aliases.enchantroom = aliases.shop1
-  delete aliases.shop1
-  console.log('renamed /shop1 -> /enchantroom  (dev-notes open issue #2)\n')
-}
-
 for (const { name, e } of added) {
   console.log(`  /${name.padEnd(12)} ${e.file.padEnd(17)} ${(e.size || '').padEnd(14)} ${String(e.blocks).padStart(8)} blocks`)
 }
