@@ -13,11 +13,11 @@ const { DATA_VERSION, SERVER } = require('../src/version')
 // hopper filters nothing, so it grabs whatever passes and swallows it into the
 // first slot. A sorter placed from a .schem is always in that state, because
 // container inventories live in block-entity data that prismarine-schematic
-// discards. 17071.schem arrives with 300 empty filters.
+// discards. /sorter1 arrives with 300 empty filters.
 //
-//   node tools/load-sorter.js --at 610 59 12 --what 17071.schem            # preview
-//   node tools/load-sorter.js --at 610 59 12 --what 17071.schem --map      # slot map
-//   node tools/load-sorter.js --at 610 59 12 --what 17071.schem --apply --server mc-test
+//   node tools/load-sorter.js --at 610 59 12 --what /sorter1            # preview
+//   node tools/load-sorter.js --at 610 59 12 --what /sorter1 --map      # slot map
+//   node tools/load-sorter.js --at 610 59 12 --what /sorter1 --apply --server mc-test
 //   node tools/load-sorter.js ... --out templates/sorter1/setup.txt
 //
 // --items <file> takes one item id per line to override the built-in list.
@@ -25,6 +25,7 @@ const { DATA_VERSION, SERVER } = require('../src/version')
 const fs = require('fs')
 const path = require('path')
 const schemMod = require('../src/building/schematic')
+const blueprints = require('../src/building/blueprints')
 const { baseName } = require('../src/building/blockspec')
 
 const arg = (n, d = null) => { const i = process.argv.indexOf(`--${n}`); return i === -1 ? d : process.argv[i + 1] }
@@ -48,9 +49,13 @@ function mergeCommand (pos, item, absolute) {
 }
 
 ;(async () => {
-  const what = arg('what', '17071.schem')
+  const what = arg('what', '/sorter1')
   const registry = require('minecraft-data')(DATA_VERSION)
-  const s = await schemMod.loadSchematic(what, DATA_VERSION)
+  // --what takes a blueprint name (/sorter1) or a path to a file. Resolving
+  // through blueprints.js is what keeps these tools and the chat bot naming
+  // the same thing.
+  const entry = blueprints.resolve(what)
+  const s = await schemMod.loadSchematic(entry ? entry.path : what, DATA_VERSION)
   const { blocks } = schemMod.schematicToBlocks(s)
   const filters = findFilters(blocks)
   if (!filters.length) { console.error(`no filter hoppers in ${what}`); process.exit(1) }

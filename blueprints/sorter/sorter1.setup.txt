@@ -1,0 +1,19 @@
+# Beacon effects for the four-beacon cluster on the roof (a 2x2 sharing one
+# iron pyramid). ~x ~y ~z are offsets from the blueprint origin (min corner).
+#
+# A beacon's effect is chosen in its GUI and stored as block-entity data, which
+# no .schem carries - so a pasted beacon glows and buffs nobody. These set it
+# directly; no payment is needed when set this way.
+#
+# The pyramid's 9x9 base is centred so the ~59 pair validates only three
+# layers: they get a primary effect but no secondary. The ~58 pair sees all
+# four layers and carries Regeneration as well. Overlapping beacons stack, so
+# anyone in range gets Speed, Haste and Regeneration together.
+#
+# The 280 filter hoppers are NOT loaded here. Load them with
+#   tools/load-sorter.js --what /sorter1 --at <x> <y> <z> --apply
+# and label them with tools/label-sorter.js the same way.
+/data merge block ~24 ~17 ~58 {primary_effect:"minecraft:speed",secondary_effect:"minecraft:regeneration"}
+/data merge block ~25 ~17 ~58 {primary_effect:"minecraft:haste",secondary_effect:"minecraft:regeneration"}
+/data merge block ~24 ~17 ~59 {primary_effect:"minecraft:speed"}
+/data merge block ~25 ~17 ~59 {primary_effect:"minecraft:haste"}

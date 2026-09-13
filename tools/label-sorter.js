@@ -9,12 +9,12 @@ const { DATA_VERSION, SERVER } = require('../src/version')
 // convention is a frame on the chest face holding one of the item, so the aisle
 // reads at a glance.
 //
-// Frames are entities, so a .schem cannot carry them (17071.schem stores zero
+// Frames are entities, so a .schem cannot carry them (/sorter1 stores zero
 // Entities) - they have to be summoned. Item and slot come from the same
 // flow-order walk load-sorter.js uses, so frame and filter always agree.
 //
-//   node tools/label-sorter.js --at 610 59 12 --what 17071.schem --limit 6 --apply
-//   node tools/label-sorter.js --at 610 59 12 --what 17071.schem --apply
+//   node tools/label-sorter.js --at 610 59 12 --what /sorter1 --limit 6 --apply
+//   node tools/label-sorter.js --at 610 59 12 --what /sorter1 --apply
 //   node tools/label-sorter.js ... --clear      # remove frames in the region
 //
 // --limit places only the first N, for checking the facing before committing.
@@ -22,6 +22,7 @@ const { DATA_VERSION, SERVER } = require('../src/version')
 const fs = require('fs')
 const path = require('path')
 const schemMod = require('../src/building/schematic')
+const blueprints = require('../src/building/blueprints')
 const { baseName } = require('../src/building/blockspec')
 
 const arg = (n, d = null) => { const i = process.argv.indexOf(`--${n}`); return i === -1 ? d : process.argv[i + 1] }
@@ -32,12 +33,16 @@ const FACE = { down: 0, up: 1, north: 2, south: 3, west: 4, east: 5 }
 const DIR = { north: [0, 0, -1], south: [0, 0, 1], west: [-1, 0, 0], east: [1, 0, 0], up: [0, 1, 0], down: [0, -1, 0] }
 
 ;(async () => {
-  const what = arg('what', '17071.schem')
+  const what = arg('what', '/sorter1')
   const at = process.argv.indexOf('--at')
   if (at === -1) { console.error('--at <x> <y> <z> is required'); process.exit(1) }
   const O = { x: +process.argv[at + 1], y: +process.argv[at + 2], z: +process.argv[at + 3] }
 
-  const s = await schemMod.loadSchematic(what, DATA_VERSION)
+  // --what takes a blueprint name (/sorter1) or a path to a file. Resolving
+  // through blueprints.js is what keeps these tools and the chat bot naming
+  // the same thing.
+  const entry = blueprints.resolve(what)
+  const s = await schemMod.loadSchematic(entry ? entry.path : what, DATA_VERSION)
   const { blocks } = schemMod.schematicToBlocks(s)
   const at3 = new Map()
   for (const b of blocks) at3.set(`${b.pos.x},${b.pos.y},${b.pos.z}`, b.name)
